@@ -1,9 +1,12 @@
 import os
-import re
 import tempfile
 import urllib.error
-import urllib.parse
 import urllib.request
+
+from doc_ingest.dataset_config import URL_TIMEOUT_SECONDS
+from doc_ingest.dataset_config import build_url_request
+from doc_ingest.dataset_config import has_hugging_face_name_shape
+from doc_ingest.dataset_config import is_url
 
 
 def validate_inputs(size: int, input_path: str, output_path: str):
@@ -25,16 +28,16 @@ def validate_inputs(size: int, input_path: str, output_path: str):
 	# 2. size must be greater than 0
 	validate_size_is_positive(size)
 
-	# 5. input_path must not be empty or only spaces
+	# 3. input_path must not be empty or only spaces
 	validate_input_path_is_not_empty(input_path)
 
-	# 6. input_path must not match more than one kind of input
+	# 4. input_path must not match more than one kind of input
 	validate_input_path_is_not_ambiguous(input_path)
 
-	# local input_path must exist on this machine
+	# 5. local input_path must exist on this machine
 	validate_local_input_path_exists(input_path)
 
-	# url input_path must be reachable
+	# 6. url input_path must be reachable
 	validate_url_input_path_exists(input_path)
 
 	# 7. output_path must not be empty or only spaces
@@ -43,11 +46,11 @@ def validate_inputs(size: int, input_path: str, output_path: str):
 	# 8. if output_path already exists, it must be a folder, not a file
 	validate_output_path_is_not_a_file(output_path)
 
-	# 10. output_path must not be the input folder or inside it
-	# (runs before 9, so a bad output folder is never created)
+	# 9. output_path must not be the input folder or inside it
+	# (runs before 10, so a bad output folder is never created)
 	validate_output_path_is_outside_input_folder(input_path, output_path)
 
-	# 9. output_path must be creatable and writable
+	# 10. output_path must be creatable and writable
 	validate_output_path_is_writable(output_path)
 
 
@@ -127,7 +130,7 @@ def validate_input_path_is_not_ambiguous(input_path):
 	if is_url(input_path):
 		matched_kinds.append("url")
 
-	if looks_like_huggingface_dataset(input_path):
+	if has_hugging_face_name_shape(input_path):
 		matched_kinds.append("huggingface_dataset")
 
 	if len(matched_kinds) <= 1:
@@ -160,7 +163,7 @@ def validate_local_input_path_exists(input_path):
 	if is_url(input_path):
 		return
 
-	if looks_like_huggingface_dataset(input_path):
+	if has_hugging_face_name_shape(input_path):
 		return
 
 	if not is_local_path(input_path):
@@ -179,8 +182,8 @@ def validate_url_input_path_exists(input_path):
 		download). Some servers refuse HEAD, so on a 403 or 405 answer it
 		tries a normal GET request and closes it without reading the body.
 		Raises an error if the server answers with an error code (for
-		example 404), cannot be reached, or does not answer within 10
-		seconds. Inputs that are not URLs are skipped.
+		example 404), cannot be reached, or does not answer within
+		URL_TIMEOUT_SECONDS. Inputs that are not URLs are skipped.
 	"""
 	if not is_url(input_path):
 		return
@@ -215,12 +218,8 @@ def request_url_and_close(url, request_method):
 		Sends one request to url, follows redirects, and closes the
 		connection straight away without downloading the body.
 	"""
-	url_request = urllib.request.Request(
-		url,
-		method=request_method,
-		headers={"User-Agent": "DocIngestEngine/0.1"},
-	)
-	with urllib.request.urlopen(url_request, timeout=10):
+	url_request = build_url_request(url, request_method, {})
+	with urllib.request.urlopen(url_request, timeout=URL_TIMEOUT_SECONDS):
 		pass
 
 
@@ -332,47 +331,3 @@ def is_local_path(path):
 	"""
 	path_exists = os.path.exists(path)
 	return path_exists
-
-
-def is_url(path):
-	"""
-	Input:
-		path - any input path text.
-	Output:
-		True if path is a web URL that starts with http:// or https:// and
-		has a host name, otherwise False.
-	What it does:
-		Splits path into URL parts and checks the scheme and host.
-	"""
-	url_parts = urllib.parse.urlparse(path)
-
-	scheme_is_web = url_parts.scheme in ("http", "https")
-	if not scheme_is_web:
-		return False
-
-	host_is_present = url_parts.netloc != ""
-	if not host_is_present:
-		return False
-
-	return True
-
-
-def looks_like_huggingface_dataset(path):
-	"""
-	Input:
-		path - any input path text.
-	Output:
-		True if path has the shape of a Hugging Face dataset name,
-		"owner/dataset" (for example "superdoc-dev/docx-corpus"),
-		otherwise False.
-	What it does:
-		Matches path against the owner/dataset pattern: exactly one slash,
-		and only letters, digits, "-", "_" and "." in each part.
-		It only checks the shape. It does not check that the dataset exists.
-	"""
-	huggingface_dataset_pattern = r"[A-Za-z0-9][A-Za-z0-9_.-]*/[A-Za-z0-9][A-Za-z0-9_.-]*"
-	pattern_match = re.fullmatch(huggingface_dataset_pattern, path)
-	if pattern_match is None:
-		return False
-
-	return True

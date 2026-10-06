@@ -2,9 +2,9 @@
 parser.py
 
 Defines the Parser interface every format implementation must follow,
-including the content hash every parser computes, plus the registry
-mapping format name -> implementation and the lookup function used by
-ingest.py.
+plus the registry mapping document type -> implementation, the lookup
+function, and parse_document, which ingest.py runs in parse worker
+processes.
 
 Concrete parsers (e.g. PDFParser) subclass Parser, so they import this
 module. Importing them back at the top of this module would create a
@@ -18,23 +18,31 @@ import hashlib
 import time 
 
 from doc_ingest.schema import Document
-
+from doc_ingest.raw_data import RawData
 
 class Parser(abc.ABC):
 	@abc.abstractmethod
-	def parse(self, doc_id: str, source_path: str) -> Document:
+	def parse(self, raw_data: RawData) -> Document:
 		"""
-		doc_id: this document's identifier, already computed from the raw
-			 bytes by RawData.make_doc_id. Implementations must set
-			 Document.id to this value directly rather than recomputing it.
-		source_path: the original raw data path of the document.
-
-		Returns a fully-populated Document.
+		Input: raw_data - the document to parse: its doc_id (already
+			computed from the raw bytes by RawDataFetcher.make_doc_id),
+			its doc_type, raw_path, the path of its saved raw file, and
+			source_path, where it came from.
+		Output: a fully-populated Document.
+		What it does: reads the raw file and builds a Document from it.
+			Implementations must set Document.id to raw_data.doc_id
+			directly rather than recomputing it.
 		"""
 		raise NotImplementedError
 
 
 def get_parser(doc_type: str) -> type[Parser]:
+	"""
+	Input: doc_type - a document type (e.g. "pdf").
+	Output: the Parser class registered for that type.
+	What it does: looks the type up in the parser registry. Raises
+		ValueError if no parser is registered for it.
+	"""
 	# imported here, not at module level, to avoid the circular import
 	# described above
 	from doc_ingest.parsers.pdf import PDFParser
@@ -49,23 +57,21 @@ def get_parser(doc_type: str) -> type[Parser]:
 		)
 	return parser_registry[doc_type]
 
-def parse_document(doc_type: str, doc_id: str, source_path: str) -> tuple:
+def parse_document(raw_data: RawData) -> tuple:
 	"""
-	doc_type: document type (e.g. "docx").
-	doc_id: document identifier.
-	source_path: path of the raw file.
-
-	Reads and parses the raw file in a parse worker process. Parse
-	errors are not raised; the document is returned as None instead.
-
-	Returns (doc_id, document). On failure, document is None.
+	Input: raw_data - the document to parse (doc_id, doc_type and
+		raw_path of its saved raw file).
+	Output: (doc_id, document). On failure, document is None.
+	What it does: picks the parser for raw_data.doc_type and parses the
+		raw file, in a parse worker process. Parse errors are not
+		raised; the document is returned as None instead.
 	"""
 	
 	try:
-		parser_cls = get_parser(doc_type)
+		parser_cls = get_parser(raw_data.doc_type)
 		parser = parser_cls()
-		document = parser.parse(doc_id, source_path)
+		document = parser.parse(raw_data)
 	except Exception as error:
-		return doc_id, None
+		return raw_data.doc_id, None
 
-	return doc_id, document
+	return raw_data.doc_id, document

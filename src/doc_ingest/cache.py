@@ -1,5 +1,8 @@
 import os
 import json
+
+import pydantic
+
 from doc_ingest.schema import Document
 
 
@@ -27,12 +30,14 @@ def load_processed_document(output_path: str, dataset_name: str, doc_id: str) ->
 		dataset_name - name of the dataset (from get_dataset_name).
 		doc_id - id of the processed document.
 	Output:
-		The cached Document, or None if no cached file exists for doc_id.
+		The cached Document, or None if no cached file exists for doc_id
+		or the file is damaged.
 	What it does:
 		Reads the document's cached JSON file and turns it into a Document.
-		Pydantic checks the file against the schema while reading it and
-		raises pydantic.ValidationError if a field is missing or has the
-		wrong type.
+		Pydantic checks the file against the schema while reading it. If
+		the file is not valid JSON, or a field is missing or has the wrong
+		type, a message is printed and None is returned, so one damaged
+		file does not stop the run.
 	"""
 	processed_document_path = get_processed_document_path(output_path, dataset_name, doc_id)
 	if not os.path.exists(processed_document_path):
@@ -41,7 +46,12 @@ def load_processed_document(output_path: str, dataset_name: str, doc_id: str) ->
 	with open(processed_document_path, encoding="utf-8") as processed_document_file:
 		processed_document_json = processed_document_file.read()
 
-	processed_document = Document.model_validate_json(processed_document_json)
+	try:
+		processed_document = Document.model_validate_json(processed_document_json)
+	except pydantic.ValidationError as validation_error:
+		print(f"Cached document {doc_id} is damaged: {processed_document_path} ({validation_error.error_count()} error(s))")
+		return None
+
 	return processed_document
 
 def save_processed_document(output_path: str, dataset_name: str, document: Document):

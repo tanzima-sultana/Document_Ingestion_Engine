@@ -3,11 +3,6 @@ import json
 import os
 
 
-# Folder (relative to where the program is started, the repo root via run.sh)
-# that holds one progress file per dataset
-PROGRESS_FOLDER = "progress"
-
-
 @dataclasses.dataclass
 class Progress:
 	dataset_name: str
@@ -20,7 +15,8 @@ def make_progress(dataset_name: str, raw_data_count: int, processed_doc_ids: lis
 	"""
 	Input:
 		dataset_name - name of the dataset (from get_dataset_name).
-		raw_data_count - number of raw documents found in the dataset.
+		raw_data_count - number of source rows read so far, across all
+		runs; the next run continues after them.
 		processed_doc_ids - ids of documents already processed.
 		skipped_doc_ids - ids of documents that were skipped.
 	Output:
@@ -37,25 +33,26 @@ def make_progress(dataset_name: str, raw_data_count: int, processed_doc_ids: lis
 	return progress
 
 
-def get_progress_path(dataset_name: str) -> str:
+def get_progress_path(output_path:str, dataset_name: str) -> str:
 	"""
 	Input:
+		output_path - the --output_path folder.
 		dataset_name - name of the dataset (from get_dataset_name).
 	Output:
 		Path of this dataset's progress file, for example
-		"progress/progress_superdoc-dev__docx-corpus.json".
+		"outputs/docx-corpus/progress.json".
 	What it does:
-		Gives every dataset its own progress file, so the progress of one
-		dataset is never loaded for another.
+		Keeps the progress file next to the dataset's cached documents, so
+		the progress always describes the cache in the same output folder.
 	"""
-	progress_file_name = f"progress_{dataset_name}.json"
-	progress_path = os.path.join(PROGRESS_FOLDER, progress_file_name)
+	progress_path = os.path.join(f"{output_path}/{dataset_name}/", f"progress.json")
 	return progress_path
 
 
-def load_progress(dataset_name: str) -> Progress:
+def load_progress(output_path:str, dataset_name: str) -> Progress:
 	"""
 	Input:
+		output_path - the --output_path folder.
 		dataset_name - name of the dataset (from get_dataset_name).
 	Output:
 		The saved Progress for this dataset, or an empty Progress (count 0,
@@ -64,7 +61,7 @@ def load_progress(dataset_name: str) -> Progress:
 		Reads the dataset's progress file. Raises ValueError if the file is
 		damaged, is missing a field, or belongs to a different dataset.
 	"""
-	progress_path = get_progress_path(dataset_name)
+	progress_path = get_progress_path(output_path, dataset_name)
 
 	if not os.path.exists(progress_path):
 		empty_progress = make_progress(dataset_name, 0, [], [])
@@ -95,9 +92,10 @@ def load_progress(dataset_name: str) -> Progress:
 	return progress
 
 
-def save_progress(dataset_name: str, progress: Progress) -> None:
+def save_progress(output_path:str, dataset_name: str, progress: Progress) -> None:
 	"""
 	Input:
+		output_path - the --output_path folder.
 		dataset_name - name of the dataset (from get_dataset_name).
 		progress - the Progress to save.
 	Output:
@@ -107,7 +105,7 @@ def save_progress(dataset_name: str, progress: Progress) -> None:
 		temporary file and then swaps it into place, so a crash while
 		writing never leaves a half-written progress file behind.
 	"""
-	progress_path = get_progress_path(dataset_name)
+	progress_path = get_progress_path(output_path, dataset_name)
 	temporary_file_path = progress_path + ".tmp"
 
 	progress_folder = os.path.dirname(progress_path)

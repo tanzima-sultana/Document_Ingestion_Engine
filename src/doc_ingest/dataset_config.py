@@ -2,6 +2,7 @@ import base64
 import binascii
 import dataclasses
 import email.message
+import hashlib
 import io
 import json
 import os
@@ -98,13 +99,31 @@ URL_HEADERS_CACHE = {}
 URL_LEADING_BYTES_CACHE = {}
 URL_FIRST_RECORD_CACHE = {}
 
-# Shape of a Hugging Face dataset name: "name" or "owner/name", made of
-# letters, digits, ".", "_" and "-".
-HUGGING_FACE_NAME_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*(/[A-Za-z0-9][A-Za-z0-9._-]*)?")
+# Shape of a Hugging Face dataset name: "owner/name", made of letters,
+# digits, ".", "_" and "-". Bare names without an owner are not accepted,
+# so a mistyped local folder name is not mistaken for a dataset.
+HUGGING_FACE_NAME_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._-]*")
 
-# Value of DatasetConfig.extension for a Hugging Face dataset, which is a
-# set of records rather than files with one extension.
-HUGGING_FACE_EXTENSION = "hf"
+# Host of the Hugging Face website. A dataset page URL on it,
+# "https://huggingface.co/datasets/<owner>/<name>", is read as the
+# dataset "<owner>/<name>" rather than as a web page.
+HUGGING_FACE_HOST = "huggingface.co"
+
+# Parts of a Hugging Face dataset page URL that may follow
+# "/datasets/<owner>/<name>" and still mean the whole dataset.
+HUGGING_FACE_DATASET_PAGE_SUFFIXES = [
+	"tree",
+	"viewer",
+]
+
+# Value of DatasetConfig.format for a Hugging Face dataset, which is a set
+# of records rather than files with one extension.
+HUGGING_FACE_FORMAT = "hf"
+
+# Value of DatasetConfig.format for a local folder of document files. The
+# files can be of different types; each file's type comes from its own
+# extension.
+FOLDER_FORMAT = "folder"
 
 # Split read from a Hugging Face dataset.
 HUGGING_FACE_SPLIT = "train"
@@ -113,16 +132,18 @@ HUGGING_FACE_SPLIT = "train"
 # dataset is not opened again by every helper. Keyed by dataset name.
 HUGGING_FACE_FIRST_RECORD_CACHE = {}
 
+# Per-process cache of each dataset's format, so a local folder is not
+# walked again by every helper that needs the format. Keyed by path.
+DATASET_FORMAT_CACHE = {}
+
 
 @dataclasses.dataclass
 class DatasetConfig:
 	name: str
 	path: str
 	path_type: str
-	doc_type: str
-	extension: str
+	format: str
 	content_field: str | None
-	content_encoding: str | None
 	size: int
 
 
@@ -131,19 +152,20 @@ def get_dataset_config(path) -> DatasetConfig:
 	Input: path to a dataset, either a single file or a directory of files.
 	Output: a DatasetConfig describing the dataset.
 	What it does: inspects the path and collects the dataset name, whether it
-	is a file or directory, the document type, the file extension, (for
-	container files such as JSONL) which field holds the content and how that
-	content is encoded, and the number of documents in the dataset.
+	is a URL, local path or Hugging Face dataset, the dataset format (see
+	get_dataset_format), (for container datasets such as JSONL) which field
+	holds the content, and the number of documents in the dataset. The
+	document type and the content encoding are not part of the config,
+	because they can differ from one document to the next; they are found
+	per document when the raw data is read (see raw_data.py).
 	"""
 	name = get_dataset_name(path)
 	path_type = get_dataset_path_type(path)
-	doc_type = get_document_type(path)
-	extension = get_document_extension(path)
+	dataset_format = get_dataset_format(path)
 	content_field = get_content_field(path)
-	content_encoding = get_content_encoding(path)
 	size = get_dataset_size(path)
 
-	return DatasetConfig(name, path, path_type, doc_type, extension, content_field, content_encoding, size)
+	return DatasetConfig(name, path, path_type, dataset_format, content_field, size)
 
 
 def get_dataset_size(path) -> int:
@@ -158,7 +180,7 @@ def get_dataset_size(path) -> int:
 	- Container datasets (JSONL/JSON): -1, because counting records means
 	  reading every line or the whole file.
 	- A single local file or a URL: 1, since it is one document.
-	- A local directory: the number of files that have the dataset's
+	- A local directory: the number of files with a supported document
 	  extension (other files are ignored by ingestion anyway).
 	"""
 	if is_hugging_face_dataset(path):
@@ -173,10 +195,9 @@ def get_dataset_size(path) -> int:
 	if os.path.isfile(path):
 		return 1
 
-	extension = get_document_extension(path)
 	document_count = 0
 	for file_path in list_dataset_files(path):
-		if get_extension_of_file(file_path) == extension:
+		if get_extension_of_file(file_path) in EXTENSION_TO_DOCUMENT_TYPE:
 			document_count = document_count + 1
 
 	return document_count
@@ -186,28 +207,27 @@ def get_dataset_name(path) -> str:
 	"""
 	Input: path to a dataset file or directory, a URL, or a Hugging Face
 	dataset name.
-	Output: the dataset name as a string.
-	What it does: takes the last part of the path. For a file, the extension
-	is removed (e.g. "/data/reports.jsonl" -> "reports"). For a directory, the
-	folder name is used as is (e.g. "/data/contracts/" -> "contracts"). For a
-	URL, see get_url_dataset_name. For a Hugging Face dataset, the part after
-	the owner is used (e.g. "owner/papers" -> "papers").
+	Output: the dataset name, e.g. "reports_1a2b3c4d".
+	What it does: last part of the path without extension, plus a short hash
+	of the full path or URL, so two inputs never share progress and cache.
 	"""
 	if is_url(path):
-		return get_url_dataset_name(path)
-
-	if is_hugging_face_dataset(path):
+		readable_name = get_url_dataset_name(path)
+		full_path = path
+	elif is_hugging_face_dataset(path):
 		name_parts = path.split("/")
-		return name_parts[-1]
+		readable_name = name_parts[-1]
+		full_path = path
+	else:
+		full_path = os.path.abspath(path)
+		base_name = os.path.basename(full_path)
+		if os.path.isdir(full_path):
+			readable_name = base_name
+		else:
+			readable_name, _extension = os.path.splitext(base_name)
 
-	normalized_path = os.path.normpath(path)
-	base_name = os.path.basename(normalized_path)
-
-	if os.path.isdir(normalized_path):
-		return base_name
-
-	name_without_extension, _extension = os.path.splitext(base_name)
-	return name_without_extension
+	path_hash = hashlib.sha256(full_path.encode("utf-8")).hexdigest()
+	return f"{readable_name}_{path_hash[:8]}"
 
 
 def get_dataset_path_type(path) -> str:
@@ -232,23 +252,45 @@ def get_dataset_path_type(path) -> str:
 	raise FileNotFoundError(f"Dataset path does not exist: {path}")
 
 
-def get_document_extension(path) -> str:
+def get_dataset_format(path) -> str:
 	"""
 	Input: path to a dataset file or directory, a URL, or a Hugging Face
 	dataset name.
-	Output: lowercase file extension without the dot (e.g. "pdf", "jsonl"),
-	or HUGGING_FACE_EXTENSION for a Hugging Face dataset, which has no single
-	file extension.
-	What it does: for a file, returns its own extension. For a directory,
-	walks all files inside it (skipping hidden files) and returns the most
-	common extension. For a URL, see get_url_document_extension. Raises
-	ValueError if no extension can be found.
+	Output: the dataset format (see find_dataset_format).
+	What it does: returns the format from DATASET_FORMAT_CACHE if it was
+	already found for this path; otherwise finds it with
+	find_dataset_format and caches it.
+	"""
+	if path in DATASET_FORMAT_CACHE:
+		return DATASET_FORMAT_CACHE[path]
+
+	dataset_format = find_dataset_format(path)
+	DATASET_FORMAT_CACHE[path] = dataset_format
+	return dataset_format
+
+
+def find_dataset_format(path) -> str:
+	"""
+	Input: path to a dataset file or directory, a URL, or a Hugging Face
+	dataset name.
+	Output: the dataset format, which decides how the dataset is read:
+		HUGGING_FACE_FORMAT ("hf") - a Hugging Face dataset
+		"jsonl" or "json"          - container files holding records
+		FOLDER_FORMAT ("folder")   - a local folder of document files
+		any other extension        - a single document file or URL
+		                             (e.g. "pdf", "docx")
+	What it does: for a single file, returns its extension. For a URL, see
+	get_url_document_extension. For a directory, if it holds container files
+	(JSONL/JSON), returns the most common container extension; otherwise
+	returns FOLDER_FORMAT, because the folder can hold documents of
+	different types. Raises ValueError if a file has no extension, or a
+	directory has no container files and no supported document files.
 	"""
 	if is_url(path):
 		return get_url_document_extension(path)
 
 	if is_hugging_face_dataset(path):
-		return HUGGING_FACE_EXTENSION
+		return HUGGING_FACE_FORMAT
 
 	if os.path.isfile(path):
 		extension = get_extension_of_file(path)
@@ -256,47 +298,30 @@ def get_document_extension(path) -> str:
 			raise ValueError(f"Dataset file has no extension: {path}")
 		return extension
 
-	extension_counts = {}
+	container_extension_counts = {}
+	supported_document_count = 0
 	for file_path in list_dataset_files(path):
 		extension = get_extension_of_file(file_path)
-		if extension == "":
-			continue
-		if extension not in extension_counts:
-			extension_counts[extension] = 0
-		extension_counts[extension] = extension_counts[extension] + 1
+		if extension in CONTAINER_EXTENSIONS:
+			if extension not in container_extension_counts:
+				container_extension_counts[extension] = 0
+			container_extension_counts[extension] = container_extension_counts[extension] + 1
+		elif extension in EXTENSION_TO_DOCUMENT_TYPE:
+			supported_document_count = supported_document_count + 1
 
-	if len(extension_counts) == 0:
-		raise ValueError(f"No files with an extension found in dataset directory: {path}")
+	if len(container_extension_counts) > 0:
+		most_common_extension = ""
+		most_common_count = 0
+		for extension, count in container_extension_counts.items():
+			if count > most_common_count:
+				most_common_extension = extension
+				most_common_count = count
+		return most_common_extension
 
-	most_common_extension = ""
-	most_common_count = 0
-	for extension, count in extension_counts.items():
-		if count > most_common_count:
-			most_common_extension = extension
-			most_common_count = count
+	if supported_document_count == 0:
+		raise ValueError(f"No container files or supported document files found in dataset directory: {path}")
 
-	return most_common_extension
-
-
-def get_document_type(path) -> str:
-	"""
-	Input: path to a dataset file or directory, a URL, or a Hugging Face
-	dataset name.
-	Output: the document type used by the parser registry (e.g. "pdf", "docx",
-	"html", "txt").
-	What it does: for normal files, maps the extension to a document type.
-	For container datasets (JSONL/JSON/Hugging Face), reads the first
-	record's content and guesses the document type from it. Raises
-	ValueError if the extension is not supported.
-	"""
-	if is_container_dataset(path):
-		return get_document_type_from_container(path)
-
-	extension = get_document_extension(path)
-	if extension in EXTENSION_TO_DOCUMENT_TYPE:
-		return EXTENSION_TO_DOCUMENT_TYPE[extension]
-
-	raise ValueError(f"Unsupported document extension '{extension}' for dataset: {path}")
+	return FOLDER_FORMAT
 
 
 def get_content_field(path) -> str | None:
@@ -329,28 +354,24 @@ def get_content_field(path) -> str | None:
 	)
 
 
-def get_content_encoding(path) -> str | None:
+def get_content_encoding(content_value) -> str:
 	"""
-	Input: path to a dataset file or directory, a URL, or a Hugging Face
-	dataset name.
-	Output: for container datasets, one of:
-		"bytes"  - the field already holds raw bytes (Hugging Face binary column)
-		"url"    - the field holds a link to download the document from
-		"base64" - the field holds base64-encoded bytes
-		"text"   - the field holds the document as plain text
-	None for normal document files.
-	What it does: reads the content field of the first record and checks
-	which of the above it is, in that order.
+	Input: the value of the content field of one container record.
+	Output: one of:
+		"bytes"  - the value already holds raw bytes (Hugging Face binary column)
+		"url"    - the value is a link to download the document from
+		"base64" - the value holds base64-encoded bytes
+		"text"   - the value is the document as plain text
+	What it does: checks which of the above the value is, in that order.
+	It is called for every record, because records of one dataset can be
+	encoded differently. Raises ValueError if the value is neither a string
+	nor bytes.
 	"""
-	content_field = get_content_field(path)
-	if content_field is None:
-		return None
-
-	first_record = read_first_container_record(path)
-	content_value = first_record[content_field]
-
 	if isinstance(content_value, bytes):
 		return "bytes"
+
+	if not isinstance(content_value, str):
+		raise ValueError(f"Content value is not a string or bytes: {type(content_value).__name__}")
 
 	if is_url(content_value):
 		return "url"
@@ -359,40 +380,6 @@ def get_content_encoding(path) -> str | None:
 		return "base64"
 
 	return "text"
-
-
-def get_document_type_from_container(path) -> str:
-	"""
-	Input: path to a container dataset (JSONL/JSON file or directory of them,
-	a URL to one, or a Hugging Face dataset name).
-	Output: the document type of the content stored inside the records.
-	What it does: reads the first record's content and turns it into bytes
-	according to its encoding, then checks the leading bytes (PDF, DOCX,
-	PPTX, XLSX, HTML; falls back to "txt"). When the content is a link, the
-	linked document's type is found the same way a dataset URL's is.
-	"""
-	content_field = get_content_field(path)
-	content_encoding = get_content_encoding(path)
-	first_record = read_first_container_record(path)
-	content_value = first_record[content_field]
-
-	if content_encoding == "bytes":
-		return get_document_type_from_bytes(content_value)
-
-	if content_encoding == "url":
-		linked_extension = get_url_document_extension(content_value)
-		if linked_extension in EXTENSION_TO_DOCUMENT_TYPE:
-			return EXTENSION_TO_DOCUMENT_TYPE[linked_extension]
-		raise ValueError(
-			f"Unsupported document extension '{linked_extension}' for linked document: {content_value}"
-		)
-
-	if content_encoding == "base64":
-		content_bytes = base64.b64decode(content_value)
-		return get_document_type_from_bytes(content_bytes)
-
-	content_bytes = content_value.encode("utf-8")
-	return get_document_type_from_bytes(content_bytes)
 
 
 def get_document_type_from_bytes(content_bytes) -> str:
@@ -612,12 +599,21 @@ def get_extension_of_file(file_path) -> str:
 
 def is_url(path) -> bool:
 	"""
-	Input: a dataset path string.
-	Output: True if the path is an http or https URL, otherwise False.
-	What it does: parses the path and checks its scheme against URL_SCHEMES.
+	Input: a dataset path string, or a content value of a record.
+	Output: True if it is an http or https URL with a host name, otherwise
+	False.
+	What it does: parses the string, checks its scheme against URL_SCHEMES,
+	and checks that a host name is present (so "https://" alone is not a
+	URL).
 	"""
 	parsed_path = urllib.parse.urlparse(path)
-	return parsed_path.scheme in URL_SCHEMES
+	if parsed_path.scheme not in URL_SCHEMES:
+		return False
+
+	if parsed_path.netloc == "":
+		return False
+
+	return True
 
 
 def get_url_dataset_name(url) -> str:
@@ -861,9 +857,9 @@ def is_hugging_face_dataset(path) -> bool:
 	Input: a dataset path string.
 	Output: True if the path is a Hugging Face dataset name, otherwise False.
 	What it does: a path is treated as a Hugging Face dataset name when it is
-	not a URL, does not exist on disk, and has the shape "name" or
-	"owner/name". Whether the dataset really exists on the Hub is only found
-	out when it is opened.
+	not a URL, does not exist on disk, and has the shape "owner/name".
+	Whether the dataset really exists on the Hub is only found out when it
+	is opened.
 	"""
 	if is_url(path):
 		return False
@@ -871,8 +867,80 @@ def is_hugging_face_dataset(path) -> bool:
 	if os.path.exists(path):
 		return False
 
+	return has_hugging_face_name_shape(path)
+
+
+def has_hugging_face_name_shape(path) -> bool:
+	"""
+	Input: any input path string.
+	Output: True if the string has the shape of a Hugging Face dataset
+	name, "owner/name" (e.g. "superdoc-dev/docx-corpus"), otherwise False.
+	What it does: matches the string against HUGGING_FACE_NAME_PATTERN. It
+	only checks the shape; it does not check whether a local path with the
+	same name exists, or whether the dataset exists on the Hub.
+	"""
 	name_match = HUGGING_FACE_NAME_PATTERN.fullmatch(path)
 	return name_match is not None
+
+
+def get_hugging_face_dataset_name_from_url(url) -> str | None:
+	"""
+	Input: any input path string.
+	Output: the dataset name "owner/name" if the string is a Hugging Face
+	dataset page URL, otherwise None.
+	What it does: accepts URLs on HUGGING_FACE_HOST whose path is
+	"/datasets/<owner>/<name>", optionally followed by one of
+	HUGGING_FACE_DATASET_PAGE_SUFFIXES (e.g. ".../tree/main"). Links to a
+	single file inside a dataset (e.g. ".../resolve/main/data.jsonl") are
+	not converted, because they download that one file.
+	"""
+	if not is_url(url):
+		return None
+
+	parsed_url = urllib.parse.urlparse(url)
+	host_name = parsed_url.netloc.lower()
+	if host_name != HUGGING_FACE_HOST:
+		if host_name != "www." + HUGGING_FACE_HOST:
+			return None
+
+	path_parts = []
+	for path_part in parsed_url.path.split("/"):
+		if path_part != "":
+			path_parts.append(path_part)
+
+	if len(path_parts) < 3:
+		return None
+
+	if path_parts[0] != "datasets":
+		return None
+
+	if len(path_parts) > 3:
+		if path_parts[3] not in HUGGING_FACE_DATASET_PAGE_SUFFIXES:
+			return None
+
+	dataset_name = path_parts[1] + "/" + path_parts[2]
+	if not has_hugging_face_name_shape(dataset_name):
+		return None
+
+	return dataset_name
+
+
+def normalize_input_path(input_path) -> str:
+	"""
+	Input: the --input_path value.
+	Output: the input path to use from now on.
+	What it does: if the input path is a Hugging Face dataset page URL
+	(see get_hugging_face_dataset_name_from_url), returns the dataset name
+	"owner/name" instead and prints a note, so the dataset is streamed
+	rather than its web page being downloaded as one HTML document. Any
+	other input path is returned unchanged.
+	"""
+	dataset_name = get_hugging_face_dataset_name_from_url(input_path)
+	if dataset_name is None:
+		return input_path
+
+	print("Note: input_path " + repr(input_path) + " is a Hugging Face dataset page. Using dataset " + repr(dataset_name) + ".")
+	return dataset_name
 
 
 def is_container_dataset(path) -> bool:
@@ -881,13 +949,13 @@ def is_container_dataset(path) -> bool:
 	Output: True if the dataset stores many documents as records (Hugging
 	Face dataset, JSONL or JSON), otherwise False.
 	What it does: Hugging Face datasets are always record-based. Otherwise
-	checks the dataset's extension against CONTAINER_EXTENSIONS.
+	checks the dataset's format against CONTAINER_EXTENSIONS.
 	"""
 	if is_hugging_face_dataset(path):
 		return True
 
-	extension = get_document_extension(path)
-	return extension in CONTAINER_EXTENSIONS
+	dataset_format = get_dataset_format(path)
+	return dataset_format in CONTAINER_EXTENSIONS
 
 
 def read_first_hugging_face_record(dataset_name) -> dict:

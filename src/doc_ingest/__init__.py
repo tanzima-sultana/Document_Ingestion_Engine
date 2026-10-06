@@ -8,6 +8,8 @@ import os
 import sys
 
 from doc_ingest import validate
+from doc_ingest.dataset_config import normalize_input_path
+from doc_ingest.ingest import DEFAULT_DOWNLOAD_WORKERS
 from doc_ingest.ingest import ingest_documents
 
 def parse_args(argument_list):
@@ -15,12 +17,12 @@ def parse_args(argument_list):
 	Input:
 		argument_list - list of command line strings, usually sys.argv[1:].
 	Output:
-		argparse.Namespace with three fields: size (int), input_path (str)
-		and output_path (str).
+		argparse.Namespace with size, input_path, output_path,
+		download_workers and parse_workers.
 	What it does:
-		Reads the --size, --input_path and --output_path options that run.sh
-		passes in. Stops the program with an error message if any is missing
-		or if --size is not a whole number.
+		Reads the options run.sh passes in. The worker counts are optional.
+		Stops with an error message if a required option is missing or a
+		number option is not a whole number.
 	"""
 	argument_parser = argparse.ArgumentParser(
 		description="Ingest documents into clean, deduplicated JSON."
@@ -43,6 +45,18 @@ def parse_args(argument_list):
 		required=True,
 		help="Folder where the output JSON files are written.",
 	)
+	argument_parser.add_argument(
+		"--download_workers",
+		type=int,
+		default=DEFAULT_DOWNLOAD_WORKERS,
+		help="Number of documents downloaded/decoded at the same time (default: %(default)s).",
+	)
+	argument_parser.add_argument(
+		"--parse_workers",
+		type=int,
+		default=None,
+		help="Number of documents parsed at the same time (default: number of CPU cores).",
+	)
 	parsed_arguments = argument_parser.parse_args(argument_list)
 	return parsed_arguments
 
@@ -51,8 +65,11 @@ if __name__ == "__main__":
 
 	args = parse_args(sys.argv[1:])
 	size = args.size
-	input_path = args.input_path
+	# A Hugging Face dataset page URL is turned into the dataset name
+	input_path = normalize_input_path(args.input_path)
 	output_path = args.output_path 
+	download_workers = args.download_workers
+	parse_workers = args.parse_workers
 
 	os.makedirs(args.output_path, exist_ok=True)
 
@@ -60,12 +77,17 @@ if __name__ == "__main__":
 	print("  size        : " + str(size))
 	print("  input_path  : " + input_path)
 	print("  output_path : " + output_path)
+	print("  download_workers : " + str(download_workers))
+	if parse_workers is None:
+		print("  parse_workers    : number of CPU cores")
+	else:
+		print("  parse_workers    : " + str(parse_workers))
 
 
 	# 1. Validation
 	# A failed check prints a clean message (no traceback) and stops the program
 	try:
-		validate.validate_dataset(size, input_path, output_path)
+		validate.validate_inputs(size, input_path, output_path)
 	except (TypeError, ValueError) as validation_error:
 		sys.stdout.flush()
 		print("Validation failed: " + str(validation_error), file=sys.stderr)
@@ -76,6 +98,8 @@ if __name__ == "__main__":
 		size,
 		input_path,
 		output_path,
+		download_workers=download_workers,
+		parse_workers=parse_workers,
 	)
 
 	print("Document ingestion finished")
