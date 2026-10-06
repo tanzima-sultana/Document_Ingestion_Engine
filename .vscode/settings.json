@@ -1,0 +1,16 @@
+{
+	"editor.insertSpaces": false,
+	"editor.detectIndentation": false,
+	"editor.tabSize": 4,
+	"files.insertFinalNewline": true,
+	"[python]": {
+		"editor.insertSpaces": false
+	},
+	"[markdown]": {
+		"editor.insertSpaces": false
+	},
+	"[yaml]": {
+		"editor.insertSpaces": true,
+		"editor.tabSize": 2
+	}
+}
