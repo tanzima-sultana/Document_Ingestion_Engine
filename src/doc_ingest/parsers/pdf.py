@@ -35,7 +35,15 @@ class PDFParser(Parser):
 		with open(raw_path, "rb") as f:
 			raw_bytes = f.read()
 
+		# Skip anything that is not a PDF
+		if b"%PDF" not in raw_bytes[:1024]:
+			raise ValueError("not a PDF")
+
 		reader = pypdf.PdfReader(io.BytesIO(raw_bytes))
+
+		# Encrypted PDFs are skipped for now
+		if reader.is_encrypted:
+			raise ValueError("encrypted PDF")
 
 		# Document id
 		doc_id = raw_data.doc_id

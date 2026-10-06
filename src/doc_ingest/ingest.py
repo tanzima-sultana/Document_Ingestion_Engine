@@ -2,16 +2,18 @@
 import concurrent.futures
 import multiprocessing
 import os
+import time
 
 from doc_ingest.schema import Document
 from doc_ingest.raw_data import RawDataFetcher
 from doc_ingest.dedup import Deduplicator
+from doc_ingest.summary import Summary
+from doc_ingest.summary import print_run_summary
 
 from doc_ingest import dataset_config
 from doc_ingest import progress
 from doc_ingest import cache
 from doc_ingest import parser
-
 
 # Number of documents sent to a parse worker process in one go
 PARSE_DOC_COUNT = 16
@@ -46,7 +48,11 @@ def ingest_documents(size: int, input_path: str, output_path: str, *, download_w
 		saved after every batch. Stops when size documents are collected
 		or the dataset has no more rows.
 	"""
+	run_start = time.perf_counter()
 	documents = {}
+
+	summary = Summary()
+	summary.requested_size = size
 
 	# 1. Get dataset config
 	db_config = dataset_config.get_dataset_config(input_path)
@@ -72,11 +78,14 @@ def ingest_documents(size: int, input_path: str, output_path: str, *, download_w
 		if cached_doc is None:
 			print(f"Processed document {doc_id} is missing or damaged on disk, marking it as skipped.")
 			skipped_doc_ids.add(doc_id)
+			summary.cache_missing += 1
+			summary.skipped += 1
 			continue
 
 		processed_doc_ids.append(doc_id)
 		documents[doc_id] = cached_doc
 		deduplicator.add(cached_doc)
+		summary.loaded_from_cache += 1
 
 		# if there is dataset_size cached documents already exists
 		if len(documents) == size:
@@ -91,8 +100,11 @@ def ingest_documents(size: int, input_path: str, output_path: str, *, download_w
 			)
 			progress.save_progress(output_path, db_config.name, updated_progress)
 			print(f"Loaded {len(documents)} already processed document(s). Nothing new to process.")
+			summary.returned_size = len(documents)
+			summary.total_seconds = time.perf_counter() - run_start
+			print_run_summary(summary)
 			return documents
-	
+
 
 	# 4. Fetch raw data in batches, then process each batch
 	raw_data_fetcher = RawDataFetcher(input_path, output_path, db_config, download_workers)
@@ -118,10 +130,17 @@ def ingest_documents(size: int, input_path: str, output_path: str, *, download_w
 			rows_needed = size - len(documents)
 			print(f"Batch {batch_number}: fetching {rows_needed} row(s).")
 
+			download_start = time.perf_counter()
 			raw_batch = raw_data_fetcher.fetch_raw_batch(row_iterator, rows_needed)
+			summary.download_seconds += time.perf_counter() - download_start
 			raw_items = raw_batch.raw_items
 			raw_data_count += raw_batch.rows_read
 			source_exhausted = raw_batch.source_exhausted
+
+			summary.rows += raw_batch.rows_read
+			summary.downloaded += raw_batch.downloaded
+			summary.download_failed += raw_batch.rows_read - raw_batch.downloaded
+			summary.unsupported_type += raw_batch.downloaded - len(raw_items)
 			
 			# 4b. Leave out documents that were skipped before
 			parse_items = []
@@ -131,7 +150,9 @@ def ingest_documents(size: int, input_path: str, output_path: str, *, download_w
 				parse_items.append(raw_data)
 
 			# 4c. Parse them in parallel, in parse_workers processes.
-			# executor.map returns results in the same order as parse_items
+			# executor.map returns results in the same order as parse_items.
+			# Results arrive while 4d loops over them, so parse time covers 4c and 4d.
+			parse_start = time.perf_counter()
 			processed_docs= parse_executor.map(
 					parser.parse_document,
 					parse_items,
@@ -145,21 +166,29 @@ def ingest_documents(size: int, input_path: str, output_path: str, *, download_w
 				if doc is None:
 					print(f"Skipping document {doc_id}: parse failed")
 					skipped_doc_ids.add(doc_id)
+					summary.skipped += 1
+					summary.parse_error += 1
 					continue
-
+		
 				# No text, e.g. a scanned PDF
 				if doc.text.strip() == "":
 					print(f"Skipping document {doc_id}: no text")
 					skipped_doc_ids.add(doc_id)
+					summary.skipped += 1
+					summary.no_text += 1
 					continue
 
 				# Duplicate
 				if not deduplicator.add_if_new(doc):
+					summary.duplicate += 1
 					continue
 				
 				processed_doc_ids.append(doc_id)
 				documents[doc_id] = doc
 				cache.save_processed_document(output_path, db_config.name, doc)
+				summary.processed += 1
+
+			summary.parse_seconds += time.perf_counter() - parse_start
 
 			# 4e. Save progress after every batch
 			updated_progress = progress.make_progress(
@@ -170,6 +199,12 @@ def ingest_documents(size: int, input_path: str, output_path: str, *, download_w
 			)
 			progress.save_progress(output_path, db_config.name, updated_progress)
 
+	# Run
+	summary.returned_size = len(documents)
+	summary.source_exhausted = source_exhausted
+	summary.batches = batch_number
+	summary.total_seconds = time.perf_counter() - run_start
+	print_run_summary(summary)
 
 	return documents
 

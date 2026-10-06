@@ -17,14 +17,16 @@ HEADER_FOOTER_MIN_PAGE_FRACTION = 0.5
 HEADER_FOOTER_MIN_PAGE_COUNT = 3
 
 WHITESPACE_PATTERN = re.compile(r"\s+")
+# Unicode private-use characters, used by icon fonts (e.g. phone/mail icons)
+ICON_CHARACTERS_PATTERN = re.compile("[\ue000-\uf8ff\U000f0000-\U0010ffff]")
 DIGITS_PATTERN = re.compile(r"\d+")
 
 
 def extract_clean_text(reader: pypdf.PdfReader) -> str:
 	"""
 	Input: pypdf reader of a PDF. Output: its cleaned text.
-	Collapses whitespace in each line, removes header/footer lines and
-	repeated blank lines, and joins the pages with one blank line.
+	Removes icon characters and extra whitespace from each line, drops
+	header/footer lines and repeated blank lines, joins pages with a blank line.
 	"""
 	pages_lines = []
 	for page in reader.pages:
@@ -36,6 +38,7 @@ def extract_clean_text(reader: pypdf.PdfReader) -> str:
 
 		page_lines = []
 		for line in page_text.splitlines():
+			line = ICON_CHARACTERS_PATTERN.sub("", line)
 			line = WHITESPACE_PATTERN.sub(" ", line)
 			page_lines.append(line.strip())
 		pages_lines.append(page_lines)

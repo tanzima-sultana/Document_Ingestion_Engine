@@ -53,6 +53,7 @@ CONTENT_FIELD_CANDIDATES = [
 	"bytes",
 	"raw",
 	"document",
+	"pdf",
 ]
 
 # URL schemes that mark a dataset path as remote rather than local.
@@ -369,6 +370,10 @@ def get_content_encoding(content_value) -> str:
 	"""
 	if isinstance(content_value, bytes):
 		return "bytes"
+
+	# A Hugging Face file that is not a single downloadable file (e.g. inside a zip)
+	if isinstance(content_value, dict) and "path" in content_value:
+		raise ValueError(f"file cannot be downloaded: {content_value['path']}")
 
 	if not isinstance(content_value, str):
 		raise ValueError(f"Content value is not a string or bytes: {type(content_value).__name__}")
@@ -973,9 +978,11 @@ def read_first_hugging_face_record(dataset_name) -> dict:
 	from datasets import load_dataset
 
 	streamed_dataset = load_dataset(dataset_name, split=HUGGING_FACE_SPLIT, streaming=True)
+	# Keep file columns (e.g. Pdf) as raw bytes instead of opening them
+	streamed_dataset = streamed_dataset.decode(False)
 	first_record = None
 	for row in streamed_dataset:
-		first_record = row
+		first_record = unwrap_file_values(row)
 		break
 
 	if first_record is None:
@@ -983,6 +990,41 @@ def read_first_hugging_face_record(dataset_name) -> dict:
 
 	HUGGING_FACE_FIRST_RECORD_CACHE[dataset_name] = first_record
 	return first_record
+
+
+def unwrap_file_values(row) -> dict:
+	"""
+	Input: one Hugging Face row. Output: the same row.
+	A file column read without decoding is {"bytes": ..., "path": ...}; it
+	is replaced by its bytes, or by a download URL when only an hf:// path is given.
+	"""
+	for field_name, field_value in row.items():
+		if not isinstance(field_value, dict):
+			continue
+
+		file_bytes = field_value.get("bytes")
+		file_path = field_value.get("path")
+		if isinstance(file_bytes, bytes):
+			row[field_name] = file_bytes
+		elif isinstance(file_path, str) and file_path.startswith("hf://datasets/"):
+			row[field_name] = get_hugging_face_file_url(file_path)
+
+	return row
+
+
+def get_hugging_face_file_url(hf_path) -> str:
+	"""
+	Input: "hf://datasets/<owner>/<name>@<revision>/<file path>".
+	Output: its download URL on HUGGING_FACE_HOST.
+	"""
+	repo_and_file = hf_path[len("hf://datasets/"):]
+	path_parts = repo_and_file.split("/", 2)
+	owner = path_parts[0]
+	name_and_revision = path_parts[1]
+	file_path = path_parts[2]
+	name, revision = name_and_revision.split("@", 1)
+	quoted_file_path = urllib.parse.quote(file_path)
+	return f"https://{HUGGING_FACE_HOST}/datasets/{owner}/{name}/resolve/{revision}/{quoted_file_path}"
 
 
 def get_hugging_face_row_count(dataset_name) -> int:

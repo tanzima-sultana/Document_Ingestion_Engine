@@ -22,6 +22,7 @@ from doc_ingest.dataset_config import get_extension_of_file
 from doc_ingest.dataset_config import get_url_document_extension
 from doc_ingest.dataset_config import is_url
 from doc_ingest.dataset_config import list_dataset_files
+from doc_ingest.dataset_config import unwrap_file_values
 
 # Largest number of rows read in one batch, so a large request does not
 # hold every document's bytes in memory at once. The caller asks again
@@ -55,10 +56,12 @@ class RawDataBatch:
 		source row order.
 	rows_read: source rows read for this batch, including rows that
 		failed to decode or have an unsupported document type.
+	downloaded: rows whose bytes were downloaded/decoded successfully.
 	source_exhausted: True if the source ran out of rows.
 	"""
 	raw_items: list[RawData]
 	rows_read: int
+	downloaded: int
 	source_exhausted: bool
 
 class RawDataFetcher:
@@ -123,10 +126,12 @@ class RawDataFetcher:
 		from datasets import load_dataset
 
 		dataset = load_dataset(self.input_path, split=HUGGING_FACE_SPLIT, streaming=True)
+		# Keep file columns (e.g. Pdf) as raw bytes instead of opening them
+		dataset = dataset.decode(False)
 		dataset = dataset.skip(rows_to_skip)
 
 		for row in dataset:
-			yield row
+			yield unwrap_file_values(row)
 
 	def iterate_container_records(self, records_to_skip: int) -> Iterator:
 		"""
@@ -435,12 +440,14 @@ class RawDataFetcher:
 		self.next_row_number = self.next_row_number + rows_read
 
 		raw_items = []
+		downloaded = 0
 		for row_index in range(len(rows_to_decode)):
 			row = rows_to_decode[row_index]
 			row_number = first_row_number + row_index
 			raw_bytes = decoded_results[row_index]
 			if raw_bytes is None:
 				continue
+			downloaded = downloaded + 1
 			doc_id = self.make_doc_id(raw_bytes)
 			try:
 				doc_type = self.get_document_type(row, raw_bytes)
@@ -454,4 +461,4 @@ class RawDataFetcher:
 			raw_path = self.save_raw_data(doc_id, raw_bytes, doc_type)
 			raw_items.append(RawData(doc_id, doc_type, raw_path, source_path))
 
-		return RawDataBatch(raw_items, rows_read, source_exhausted)
+		return RawDataBatch(raw_items, rows_read, downloaded, source_exhausted)
