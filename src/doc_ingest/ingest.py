@@ -1,5 +1,7 @@
 
+import logging
 import concurrent.futures
+import dataclasses
 import concurrent.futures.process
 import multiprocessing
 import os
@@ -10,301 +12,334 @@ from doc_ingest.raw_data import RawDataFetcher
 from doc_ingest.dedup import Deduplicator
 from doc_ingest.summary import Summary
 from doc_ingest.summary import print_run_summary
-from doc_ingest.text_cleanup import describe_error
+from doc_ingest.error import describe_error
 
 from doc_ingest import dataset_config
+from doc_ingest import dataset_hf
 from doc_ingest import progress
 from doc_ingest import validate
 from doc_ingest import cache
 from doc_ingest import parser
 
+logger = logging.getLogger(__name__)
+
 # Default number of documents downloaded/decoded at the same time
 DEFAULT_DOWNLOAD_WORKERS = 64
 
-def ingest_documents(size: int, input_path: str, *, download_workers: int = DEFAULT_DOWNLOAD_WORKERS, parse_workers: int | None = None) -> list[Document]:
+
+@dataclasses.dataclass
+class IngestResult:
 	"""
-	Input:
-		size - maximum number of documents to return.
-		input_path - the --input_path value: a local file or folder, a
-		Hugging Face dataset name, or its Hugging Face page URL.
-		download_workers - optional; documents downloaded/decoded at the
-		same time (default DEFAULT_DOWNLOAD_WORKERS).
-		parse_workers - optional; documents parsed at the same time, one
-		process each (default: number of CPU cores).
-	Output:
-		A list of the collected Documents.
-	What it does:
-		First turns a Hugging Face dataset page URL into the dataset name
-		(dataset_config.normalize_input_path). Then checks size, input_path and the storage folder with
-		validate.validate_inputs, which raises TypeError or
-		validate.IngestError if a check fails. Raw files, processed documents and progress are
-		stored under cache.get_storage_path().
-		Works out the dataset config, loads the saved progress for it, and
-		reads back documents that were already processed from the cache.
-		A processed document whose cached file is missing or damaged is
-		marked as skipped. If size documents have been loaded, it saves the progress
-		and returns them.
-		Otherwise it reads the dataset in batches, continuing after the
-		rows read in earlier runs: each batch is decoded and saved to raw/,
-		parsed in parallel worker processes, and checked for exact and
-		near duplicates. New documents are cached, and the progress is
-		saved after every batch. Stops when size documents are collected
-		or the dataset has no more rows.
-		A failure caused by one document skips only that document. A
-		failure to write to the storage folder (OSError, e.g. disk full)
-		stops the run, since every later document would fail too; the
-		progress saved after the last batch lets the next run continue.
+	What ingest_documents returns: the collected Documents and the run's Summary
+	(counts by skip reason, duplicates, timings).
 	"""
-	run_start = time.perf_counter()
-	documents = {}
-	storage_path = cache.get_storage_path()
+	documents: list[Document]
+	summary: Summary
 
-	# 0. Validate inputs before any work is done.
-	# A Hugging Face dataset page URL is turned into the dataset name first.
-	input_path = dataset_config.normalize_input_path(input_path)
-	validate.validate_inputs(size, input_path, storage_path)
 
-	summary = Summary()
-	summary.requested_size = size
+class IngestEngine:
+	"""
+	One ingest run. Holds the run's state (documents, progress ids, summary, deduplicator, parse pool)
+	so each step can be a method instead of a function with many parameters.
+	"""
 
-	# 1. Get dataset config
-	db_config = dataset_config.get_dataset_config(input_path)
+	def __init__(self, size: int, input_path: str, download_workers: int, parse_workers: int | None):
+		"""
+		Input: the same arguments as ingest_documents.
+		Output: a new engine with empty run state. Nothing is checked, downloaded or parsed yet.
+		"""
+		self.run_start = time.perf_counter()
+		self.size = size
+		self.input_path = input_path
+		self.download_workers = download_workers
+		self.parse_workers = parse_workers
 
-	# 2. Load progress
-	saved_progress = progress.load_progress(storage_path, db_config.name)
 
-	raw_data_count = saved_progress.raw_data_count
-	processed_doc_ids = []
-	skipped_doc_ids = set(saved_progress.skipped_doc_ids)
+		self.storage_path = cache.get_storage_path()
 
-	# 3. Check cached processed documents
+		self.documents = {}
+		self.processed_doc_ids = []
+		self.skipped_doc_ids = set()
+		self.raw_data_count = 0
+		self.batch_number = 0
+		self.source_exhausted = False
 
-	deduplicator = Deduplicator(threshold=0.90)
+		self.summary = Summary()
+		self.summary.requested_size = size
+		self.deduplicator = Deduplicator(threshold=0.90)
 
-	cached_index = 0
-	while cached_index < len(saved_progress.processed_doc_ids):
-		doc_id = saved_progress.processed_doc_ids[cached_index]
-		cached_index += 1
+		# Set in run(), once the inputs pass validation
+		self.db_config = None
+		self.parse_executor = None
 
-		cached_doc = cache.load_processed_document(storage_path, db_config.name, doc_id)
-		# If a processed doc is missing or damaged on disk
-		if cached_doc is None:
-			print(f"Processed document {doc_id} is missing or damaged on disk, marking it as skipped.")
-			skipped_doc_ids.add(doc_id)
-			summary.cache_missing += 1
-			summary.skipped += 1
-			continue
+	def run(self) -> IngestResult:
+		"""
+		Input: none (uses the engine's state).
+		Output: an IngestResult with up to size Documents and the run's Summary.
+		What it does: validates inputs, loads cached documents, then fetches and processes batches until size is reached or the dataset runs out.
+		"""
+		# 0. Validate inputs before any work is done.
+		# A Hugging Face dataset page URL is turned into the dataset name first.
+		self.input_path = dataset_hf.normalize_input_path(self.input_path)
+		validate.validate_inputs(self.size, self.input_path, self.storage_path)
 
+		# 1. Get dataset config
+		self.db_config = dataset_config.get_dataset_config(self.input_path)
+
+		# 2. Load progress
+		saved_progress = progress.load_progress(self.storage_path, self.db_config.name)
+		self.raw_data_count = saved_progress.raw_data_count
+		self.skipped_doc_ids = set(saved_progress.skipped_doc_ids)
+
+		# 3. Check cached processed documents
+		size_reached = self.load_cached_documents(saved_progress.processed_doc_ids)
+		if size_reached:
+			logger.info("Loaded %s already processed document(s). Nothing new to process.", len(self.documents))
+			return self.finish()
+
+		# 4. Fetch raw data in batches, then process each batch
+		raw_data_fetcher = RawDataFetcher(self.input_path, self.storage_path, self.db_config, self.download_workers)
+		row_iterator = raw_data_fetcher.get_iterator(self.raw_data_count)
+
+		self.create_parse_executor()
 		try:
-			deduplicator.add(cached_doc)
-		except Exception as error:
-			print(f"Processed document {doc_id} could not be added to the duplicate check, marking it as skipped: {describe_error(error)}")
-			skipped_doc_ids.add(doc_id)
-			summary.cache_missing += 1
-			summary.skipped += 1
-			continue
+			while len(self.documents) < self.size and not self.source_exhausted:
 
-		processed_doc_ids.append(doc_id)
-		documents[doc_id] = cached_doc
-		summary.loaded_from_cache += 1
+				# 4a. Download/decode as many rows as documents still missing,
+				# at most raw_data.MAX_BATCH_ROWS per batch
+				self.batch_number += 1
+				rows_needed = self.size - len(self.documents)
+				logger.info("Batch %s: fetching %s row(s).", self.batch_number, rows_needed)
 
-		# if there is dataset_size cached documents already exists
-		if len(documents) == size:
-			# Keep the not-yet-checked cached ids in progress too
-			unchecked_doc_ids = saved_progress.processed_doc_ids[cached_index:]
-			all_processed_doc_ids = processed_doc_ids + unchecked_doc_ids
-			updated_progress = progress.make_progress(
-				db_config.name,
-				raw_data_count,
-				all_processed_doc_ids,
-				list(skipped_doc_ids),
-			)
-			progress.save_progress(storage_path, db_config.name, updated_progress)
-			print(f"Loaded {len(documents)} already processed document(s). Nothing new to process.")
-			summary.returned_size = len(documents)
-			summary.total_seconds = time.perf_counter() - run_start
-			print_run_summary(summary)
-			document_list = list(documents.values())
-			return document_list
+				download_start = time.perf_counter()
+				raw_batch = raw_data_fetcher.fetch_raw_batch(row_iterator, rows_needed)
+				self.summary.download_seconds += time.perf_counter() - download_start
+				raw_items = raw_batch.raw_items
+				self.raw_data_count += raw_batch.rows_read
+				self.source_exhausted = raw_batch.source_exhausted
 
+				self.summary.rows += raw_batch.rows_read
+				self.summary.downloaded += raw_batch.downloaded
+				self.summary.download_failed += raw_batch.rows_read - raw_batch.downloaded
+				self.summary.prepare_failed += raw_batch.prepare_failed
+				self.summary.unsupported_type += raw_batch.downloaded - raw_batch.prepare_failed - len(raw_items)
 
-	# 4. Fetch raw data in batches, then process each batch
-	raw_data_fetcher = RawDataFetcher(input_path, storage_path, db_config, download_workers)
-	row_iterator = raw_data_fetcher.get_iterator(raw_data_count)
+				# 4b. Leave out documents that were skipped before
+				parse_items = []
+				for raw_data in raw_items:
+					if raw_data.doc_id in self.skipped_doc_ids:
+						continue
+					parse_items.append(raw_data)
 
-	batch_number = 0
-	source_exhausted = False
+				# 4c. Parse them in parallel, in parse_workers processes.
+				# Results are in the same order as parse_items.
+				# Parse time covers 4c and 4d.
+				parse_start = time.perf_counter()
+				parsed_docs = self.parse_batch(parse_items)
 
-	if parse_workers is None:
-		parse_workers = os.cpu_count()
-		# os.cpu_count() returns None if the core count is unknown
+				# 4d. Keep each parsed document unless it failed or is a duplicate
+				self.process_parsed_documents(parsed_docs)
+				self.summary.parse_seconds += time.perf_counter() - parse_start
+
+				# 4e. Save progress after every batch
+				self.update_progress(self.processed_doc_ids)
+
+		finally:
+			self.parse_executor.shutdown()
+
+		return self.finish()
+
+	def load_cached_documents(self, cached_doc_ids: list[str]) -> bool:
+		"""
+		Input: cached_doc_ids - processed document ids from the saved progress.
+		Output: True if size documents were loaded (progress is then already saved), else False.
+		What it does: loads each cached document into documents and the deduplicator; a missing or damaged one is marked as skipped.
+		"""
+		cached_index = 0
+		while cached_index < len(cached_doc_ids):
+			doc_id = cached_doc_ids[cached_index]
+			cached_index += 1
+
+			cached_doc = cache.load_processed_document(self.storage_path, self.db_config.name, doc_id)
+			# If a processed doc is missing or damaged on disk
+			if cached_doc is None:
+				logger.warning("Processed document %s is missing or damaged on disk, marking it as skipped.", doc_id)
+				self.skipped_doc_ids.add(doc_id)
+				self.summary.cache_missing += 1
+				self.summary.skipped += 1
+				continue
+
+			try:
+				self.deduplicator.add(cached_doc)
+			except Exception as error:
+				logger.warning("Processed document %s could not be added to the duplicate check, marking it as skipped: %s", doc_id, describe_error(error))
+				self.skipped_doc_ids.add(doc_id)
+				self.summary.cache_missing += 1
+				self.summary.skipped += 1
+				continue
+
+			self.processed_doc_ids.append(doc_id)
+			self.documents[doc_id] = cached_doc
+			self.summary.loaded_from_cache += 1
+
+			# if there is dataset_size cached documents already exists
+			if len(self.documents) == self.size:
+				# Keep the not-yet-checked cached ids in progress too
+				unchecked_doc_ids = cached_doc_ids[cached_index:]
+				all_processed_doc_ids = self.processed_doc_ids + unchecked_doc_ids
+				self.update_progress(all_processed_doc_ids)
+				return True
+
+		return False
+
+	def create_parse_executor(self) -> None:
+		"""
+		Input: none (uses self.parse_workers; None means one per CPU core).
+		Output: None. Sets self.parse_executor to a new pool of parse worker processes.
+		What it does: starts the pool with "spawn" (see README: forking with Hugging Face threads can deadlock).
+		"""
+		parse_workers = self.parse_workers
 		if parse_workers is None:
-			parse_workers = 1
+			parse_workers = os.cpu_count()
+			# os.cpu_count() returns None if the core count is unknown
+			if parse_workers is None:
+				parse_workers = 1
 
-	parse_executor = create_parse_executor(parse_workers)
-	try:
-		while len(documents) < size and not source_exhausted:
+		spawn_context = multiprocessing.get_context("spawn")
+		self.parse_executor = concurrent.futures.ProcessPoolExecutor(max_workers=parse_workers, mp_context=spawn_context)
 
-			# 4a. Download/decode as many rows as documents still missing,
-			# at most raw_data.MAX_BATCH_ROWS per batch
-			batch_number += 1
-			rows_needed = size - len(documents)
-			print(f"Batch {batch_number}: fetching {rows_needed} row(s).")
+	def parse_batch(self, parse_items: list) -> list:
+		"""
+		Input: parse_items - the RawData items to parse.
+		Output: a (doc_id, Document or None) per item, in parse_items order.
+		What it does: parses all items in parallel in self.parse_executor. If a worker process dies, the pool is replaced and the unfinished items are parsed again one at a time, so only the item that kills a worker is skipped (None).
+		"""
+		futures = []
+		for raw_data in parse_items:
+			future = self.parse_executor.submit(parser.parse_document, raw_data)
+			futures.append(future)
 
-			download_start = time.perf_counter()
-			raw_batch = raw_data_fetcher.fetch_raw_batch(row_iterator, rows_needed)
-			summary.download_seconds += time.perf_counter() - download_start
-			raw_items = raw_batch.raw_items
-			raw_data_count += raw_batch.rows_read
-			source_exhausted = raw_batch.source_exhausted
+		results = []
+		unfinished_indexes = []
+		for item_index in range(len(parse_items)):
+			raw_data = parse_items[item_index]
+			try:
+				result = futures[item_index].result()
+			except concurrent.futures.process.BrokenProcessPool:
+				unfinished_indexes.append(item_index)
+				result = (raw_data.doc_id, None)
+			except Exception as error:
+				logger.warning("Parse failed for document %s: %s", raw_data.doc_id, describe_error(error))
+				result = (raw_data.doc_id, None)
+			results.append(result)
 
-			summary.rows += raw_batch.rows_read
-			summary.downloaded += raw_batch.downloaded
-			summary.download_failed += raw_batch.rows_read - raw_batch.downloaded
-			summary.prepare_failed += raw_batch.prepare_failed
-			summary.unsupported_type += raw_batch.downloaded - raw_batch.prepare_failed - len(raw_items)
-			
-			# 4b. Leave out documents that were skipped before
-			parse_items = []
-			for raw_data in raw_items:
-				if raw_data.doc_id in skipped_doc_ids:
+		if len(unfinished_indexes) == 0:
+			return results
+
+		logger.warning("A parse worker process died. Parsing %s unfinished document(s) again, one at a time.", len(unfinished_indexes))
+		self.parse_executor.shutdown()
+		self.create_parse_executor()
+
+		for item_index in unfinished_indexes:
+			raw_data = parse_items[item_index]
+			try:
+				future = self.parse_executor.submit(parser.parse_document, raw_data)
+				result = future.result()
+			except concurrent.futures.process.BrokenProcessPool:
+				logger.warning("Parse failed for document %s: its parse worker process died", raw_data.doc_id)
+				self.parse_executor.shutdown()
+				self.create_parse_executor()
+				result = (raw_data.doc_id, None)
+			except Exception as error:
+				logger.warning("Parse failed for document %s: %s", raw_data.doc_id, describe_error(error))
+				result = (raw_data.doc_id, None)
+			results[item_index] = result
+
+		return results
+
+	def process_parsed_documents(self, parsed_docs: list) -> None:
+		"""
+		Input: parsed_docs - (doc_id, Document or None) pairs from parse_batch.
+		Output: None. Adds kept documents to documents and processed_doc_ids, and skipped ones to skipped_doc_ids.
+		What it does: skips failed, empty and duplicate documents and caches the rest. Raises OSError if the storage folder can't be written.
+		"""
+		for doc_id, doc in parsed_docs:
+
+			# Skipped
+			if doc is None:
+				logger.warning("Skipping document %s: parse failed", doc_id)
+				self.skipped_doc_ids.add(doc_id)
+				self.summary.skipped += 1
+				self.summary.parse_error += 1
+				continue
+
+			try:
+				# No text, e.g. a scanned PDF
+				if doc.text.strip() == "":
+					logger.warning("Skipping document %s: no text", doc_id)
+					self.skipped_doc_ids.add(doc_id)
+					self.summary.skipped += 1
+					self.summary.no_text += 1
 					continue
-				parse_items.append(raw_data)
 
-			# 4c. Parse them in parallel, in parse_workers processes.
-			# Results are in the same order as parse_items.
-			# Parse time covers 4c and 4d.
-			parse_start = time.perf_counter()
-			processed_docs, parse_executor = parse_batch(parse_executor, parse_workers, parse_items)
-
-			# 4d. Keep each parsed document unless it failed or is a duplicate
-			for doc_id, doc in processed_docs:
-
-				# Skipped
-				if doc is None:
-					print(f"Skipping document {doc_id}: parse failed")
-					skipped_doc_ids.add(doc_id)
-					summary.skipped += 1
-					summary.parse_error += 1
-					continue
-		
-				try:
-					# No text, e.g. a scanned PDF
-					if doc.text.strip() == "":
-						print(f"Skipping document {doc_id}: no text")
-						skipped_doc_ids.add(doc_id)
-						summary.skipped += 1
-						summary.no_text += 1
-						continue
-
-					# Duplicate
-					if not deduplicator.add_if_new(doc):
-						summary.duplicate += 1
-						continue
-
-					cache.save_processed_document(storage_path, db_config.name, doc)
-				except OSError:
-					# Writing to the storage folder failed: stop the run
-					raise
-				except Exception as error:
-					print(f"Skipping document {doc_id}: duplicate check or saving failed: {describe_error(error)}")
-					skipped_doc_ids.add(doc_id)
-					summary.skipped += 1
-					summary.keep_error += 1
+				# Duplicate
+				if not self.deduplicator.add_if_new(doc):
+					self.summary.duplicate += 1
 					continue
 
-				processed_doc_ids.append(doc_id)
-				documents[doc_id] = doc
-				summary.processed += 1
+				cache.save_processed_document(self.storage_path, self.db_config.name, doc)
+			except OSError:
+				# Writing to the storage folder failed: stop the run
+				raise
+			except Exception as error:
+				logger.warning("Skipping document %s: duplicate check or saving failed: %s", doc_id, describe_error(error))
+				self.skipped_doc_ids.add(doc_id)
+				self.summary.skipped += 1
+				self.summary.keep_error += 1
+				continue
 
-			summary.parse_seconds += time.perf_counter() - parse_start
+			self.processed_doc_ids.append(doc_id)
+			self.documents[doc_id] = doc
+			self.summary.processed += 1
 
-			# 4e. Save progress after every batch
-			updated_progress = progress.make_progress(
-				db_config.name,
-				raw_data_count,
-				processed_doc_ids,
-				list(skipped_doc_ids),
-			)
-			progress.save_progress(storage_path, db_config.name, updated_progress)
+	def update_progress(self, processed_doc_ids: list[str]) -> None:
+		"""
+		Input: processed_doc_ids - the processed ids to save (can include not-yet-checked cached ids).
+		Output: None.
+		What it does: saves the run's progress (rows read, processed and skipped ids) to the dataset's progress file.
+		"""
+		progress.update_progress(
+			self.storage_path,
+			self.db_config.name,
+			self.raw_data_count,
+			processed_doc_ids,
+			list(self.skipped_doc_ids),
+		)
 
-	finally:
-		parse_executor.shutdown()
+	def finish(self) -> IngestResult:
+		"""
+		Input: none (uses the engine's state).
+		Output: an IngestResult with the collected Documents and the run's Summary.
+		What it does: fills in the final summary numbers and logs the run summary.
+		"""
+		self.summary.returned_size = len(self.documents)
+		self.summary.source_exhausted = self.source_exhausted
+		self.summary.batches = self.batch_number
+		self.summary.total_seconds = time.perf_counter() - self.run_start
+		print_run_summary(self.summary)
 
-	# Run
-	summary.returned_size = len(documents)
-	summary.source_exhausted = source_exhausted
-	summary.batches = batch_number
-	summary.total_seconds = time.perf_counter() - run_start
-	print_run_summary(summary)
-
-	document_list = list(documents.values())
-	return document_list
+		document_list = list(self.documents.values())
+		ingest_result = IngestResult(documents=document_list, summary=self.summary)
+		return ingest_result
 
 
-def create_parse_executor(parse_workers: int) -> concurrent.futures.ProcessPoolExecutor:
+# --------------- CLI entry
+def ingest_documents(size: int, input_path: str, *, download_workers: int = DEFAULT_DOWNLOAD_WORKERS, parse_workers: int | None = None) -> IngestResult:
 	"""
-	Input: parse_workers - number of worker processes.
-	Output: a new pool of parse worker processes, started with "spawn"
-		(see README: forking with Hugging Face threads can deadlock).
+	Input: size - max documents to return; input_path - local file/folder or Hugging Face dataset; download_workers/parse_workers - optional parallelism.
+	Output: an IngestResult: .documents (up to size Documents) and .summary (the run's Summary).
+	What it does: loads cached documents first, then downloads, parses and dedups new ones in batches, saving progress after each batch so a later run can resume.
 	"""
-	spawn_context = multiprocessing.get_context("spawn")
-	parse_executor = concurrent.futures.ProcessPoolExecutor(max_workers=parse_workers, mp_context=spawn_context)
-	return parse_executor
-
-
-def parse_batch(parse_executor, parse_workers: int, parse_items: list) -> tuple:
-	"""
-	Input: parse_executor - the parse worker pool; parse_workers - its
-		size; parse_items - the RawData items to parse.
-	Output: (results, parse_executor). results is a (doc_id, Document or
-		None) per item, in parse_items order. parse_executor is the pool to
-		use from now on: a new one if a worker process died.
-	What it does: parses all items in parallel. If a worker process dies
-		(e.g. killed for using too much memory), the pool stops working and
-		every unfinished item fails. Those items are then parsed again one
-		at a time in a new pool, so only the item that kills a worker is
-		skipped (None) and the others are still parsed.
-	"""
-	futures = []
-	for raw_data in parse_items:
-		future = parse_executor.submit(parser.parse_document, raw_data)
-		futures.append(future)
-
-	results = []
-	unfinished_indexes = []
-	for item_index in range(len(parse_items)):
-		raw_data = parse_items[item_index]
-		try:
-			result = futures[item_index].result()
-		except concurrent.futures.process.BrokenProcessPool:
-			unfinished_indexes.append(item_index)
-			result = (raw_data.doc_id, None)
-		except Exception as error:
-			print(f"Parse failed for document {raw_data.doc_id}: {describe_error(error)}")
-			result = (raw_data.doc_id, None)
-		results.append(result)
-
-	if len(unfinished_indexes) == 0:
-		return results, parse_executor
-
-	print(f"A parse worker process died. Parsing {len(unfinished_indexes)} unfinished document(s) again, one at a time.")
-	parse_executor.shutdown()
-	parse_executor = create_parse_executor(parse_workers)
-
-	for item_index in unfinished_indexes:
-		raw_data = parse_items[item_index]
-		try:
-			future = parse_executor.submit(parser.parse_document, raw_data)
-			result = future.result()
-		except concurrent.futures.process.BrokenProcessPool:
-			print(f"Parse failed for document {raw_data.doc_id}: its parse worker process died")
-			parse_executor.shutdown()
-			parse_executor = create_parse_executor(parse_workers)
-			result = (raw_data.doc_id, None)
-		except Exception as error:
-			print(f"Parse failed for document {raw_data.doc_id}: {describe_error(error)}")
-			result = (raw_data.doc_id, None)
-		results[item_index] = result
-
-	return results, parse_executor
+	ingest_engine = IngestEngine(size, input_path, download_workers, parse_workers)
+	ingest_result = ingest_engine.run()
+	return ingest_result

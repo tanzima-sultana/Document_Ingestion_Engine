@@ -9,5 +9,9 @@ dependencies = [
 	"pypdf>=6.0",
 ]
 
+# Installs a "doc-ingest" command that runs the same main() as python -m doc_ingest
+[project.scripts]
+doc-ingest = "doc_ingest.__main__:main"
+
 [tool.setuptools.packages.find]
 where = ["src"]

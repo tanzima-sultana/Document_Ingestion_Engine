@@ -1,4 +1,5 @@
 
+import logging
 import os
 import re
 import urllib.request
@@ -9,19 +10,21 @@ import hashlib
 import json
 from typing import Iterator
 
-from doc_ingest.dataset_config import CONTAINER_EXTENSIONS
 from doc_ingest.dataset_config import DatasetConfig
-from doc_ingest.dataset_config import EXTENSION_TO_DOCUMENT_TYPE
-from doc_ingest.dataset_config import HUGGING_FACE_SPLIT
-from doc_ingest.dataset_config import URL_TIMEOUT_SECONDS
-from doc_ingest.dataset_config import build_url_request
 from doc_ingest.dataset_config import get_content_encoding
-from doc_ingest.dataset_config import get_document_type_from_bytes
-from doc_ingest.dataset_config import get_extension_of_file
-from doc_ingest.dataset_config import get_hugging_face_file_url
-from doc_ingest.dataset_config import list_dataset_files
-from doc_ingest.dataset_config import unwrap_file_values
-from doc_ingest.text_cleanup import describe_error
+from doc_ingest.dataset_hf import HUGGING_FACE_SPLIT
+from doc_ingest.dataset_hf import URL_TIMEOUT_SECONDS
+from doc_ingest.dataset_hf import build_url_request
+from doc_ingest.dataset_hf import get_hugging_face_file_url
+from doc_ingest.dataset_hf import unwrap_file_values
+from doc_ingest.dataset_local import CONTAINER_EXTENSIONS
+from doc_ingest.dataset_local import list_dataset_files
+from doc_ingest.document_type import EXTENSION_TO_DOCUMENT_TYPE
+from doc_ingest.document_type import get_document_type_from_bytes
+from doc_ingest.document_type import get_extension_of_file
+from doc_ingest.error import describe_error
+
+logger = logging.getLogger(__name__)
 
 # Largest number of rows read in one batch, so a large request does not
 # hold every document's bytes in memory at once. The caller asks again
@@ -133,7 +136,7 @@ class RawDataFetcher:
 			try:
 				unwrapped_row = unwrap_file_values(row)
 			except Exception as error:
-				print(f"Skipping row: could not be read: {describe_error(error)}")
+				logger.warning("Skipping row: could not be read: %s", describe_error(error))
 				unwrapped_row = None
 			yield unwrapped_row
 
@@ -218,7 +221,7 @@ class RawDataFetcher:
 							continue
 						record = json.loads(stripped_line)
 					except ValueError as error:
-						print(f"Skipping record in {container_file_path}: not valid JSON: {describe_error(error)}")
+						logger.warning("Skipping record in %s: not valid JSON: %s", container_file_path, describe_error(error))
 						record = None
 					yield record
 				return
@@ -226,7 +229,7 @@ class RawDataFetcher:
 			try:
 				loaded_json = json.loads(container_stream.read().decode("utf-8"))
 			except ValueError as error:
-				print(f"Skipping file {container_file_path}: not valid JSON: {describe_error(error)}")
+				logger.warning("Skipping file %s: not valid JSON: %s", container_file_path, describe_error(error))
 				loaded_json = None
 
 		if isinstance(loaded_json, list):
@@ -297,7 +300,7 @@ class RawDataFetcher:
 				with open(row, "rb") as f:
 					raw_bytes = f.read()
 		except Exception as error:
-			print(f"Skipping row: decode/download failed: {describe_error(error)}")
+			logger.warning("Skipping row: decode/download failed: %s", describe_error(error))
 			return None
 
 		return raw_bytes
@@ -427,7 +430,7 @@ class RawDataFetcher:
 				doc_id = self.make_doc_id(raw_bytes)
 				doc_type = self.get_document_type(row, raw_bytes)
 				if doc_type is None:
-					print(f"Skipping document {doc_id}: unsupported document type")
+					logger.warning("Skipping document %s: unsupported document type", doc_id)
 					continue
 				source_path = self.get_source_path(row, row_number)
 				raw_path = self.save_raw_data(doc_id, raw_bytes, doc_type)
@@ -435,7 +438,7 @@ class RawDataFetcher:
 				# Writing to the storage folder failed: stop the run
 				raise
 			except Exception as error:
-				print(f"Skipping row {row_number}: could not be prepared: {describe_error(error)}")
+				logger.warning("Skipping row %s: could not be prepared: %s", row_number, describe_error(error))
 				prepare_failed = prepare_failed + 1
 				continue
 

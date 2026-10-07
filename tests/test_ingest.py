@@ -2,8 +2,6 @@
 End-to-end tests for ingest_documents on a local folder of generated PDFs.
 """
 
-import contextlib
-import io
 import json
 import os
 import tempfile
@@ -36,12 +34,12 @@ class TestIngestDocuments(unittest.TestCase):
 		self.temporary_folder.cleanup()
 
 	def run_ingest(self, size):
-		"""Runs ingest_documents quietly; returns (documents, printed output)."""
-		printed_output = io.StringIO()
-		with contextlib.redirect_stdout(printed_output):
+		"""Runs ingest_documents quietly; returns (documents, logged output)."""
+		with self.assertLogs("doc_ingest", level="INFO") as captured_logs:
 			with unittest.mock.patch("doc_ingest.cache.get_storage_path", return_value=self.output_path):
-				documents = ingest_documents(size, self.input_folder, download_workers=2, parse_workers=2)
-		return documents, printed_output.getvalue()
+				ingest_result = ingest_documents(size, self.input_folder, download_workers=2, parse_workers=2)
+		logged_output = "\n".join(captured_logs.output)
+		return ingest_result.documents, logged_output
 
 	def read_progress(self):
 		"""Reads the dataset's progress.json."""

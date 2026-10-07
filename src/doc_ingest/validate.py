@@ -1,15 +1,12 @@
+import logging
 import os
 import tempfile
 
-from doc_ingest.dataset_config import has_hugging_face_name_shape
-from doc_ingest.dataset_config import is_url
+from doc_ingest.dataset_hf import has_hugging_face_name_shape
+from doc_ingest.dataset_hf import is_url
+from doc_ingest.error import IngestError
 
-
-class IngestError(ValueError):
-	"""
-	A problem the user can fix (bad input, unusable storage folder, damaged
-	progress file). The CLI prints only its message, without a traceback.
-	"""
+logger = logging.getLogger(__name__)
 
 
 def validate_inputs(size: int, input_path: str, storage_path: str):
@@ -124,7 +121,7 @@ def validate_input_path_is_not_ambiguous(input_path):
 	if not has_hugging_face_name_shape(input_path):
 		return
 
-	print("Note: input_path " + repr(input_path) + " matches a local path and a Hugging Face dataset name. Using the local path.")
+	logger.warning("Note: input_path %r matches a local path and a Hugging Face dataset name. Using the local path.", input_path)
 
 
 def validate_local_input_path_exists(input_path):

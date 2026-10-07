@@ -1,11 +1,14 @@
 """
 summary.py
 
-Counts and prints the end-of-run summary of doc processing: documents
+Counts and logs the end-of-run summary of doc processing: documents
 loaded, newly processed and skipped by reason, and document parse times.
 """
 
+import logging
 import dataclasses
+
+logger = logging.getLogger(__name__)
 
 
 @dataclasses.dataclass
@@ -42,22 +45,22 @@ class Summary:
 def print_run_summary(summary: Summary) -> None:
 	"""
 	Input: the run's Summary. Output: none.
-	Prints the run counts, documents skipped by reason, and timings.
+	Logs (INFO) the run counts, documents skipped by reason, and timings.
 	"""
-	print(f"Requested {summary.requested_size} document(s), returned {summary.returned_size}.")
-	print(f"Dataset ran out of rows: {summary.source_exhausted}")
-	print(f"Batches: {summary.batches}")
-	print(f"Raw rows {summary.rows} have been consumed")
-	print(f"Raw data {summary.downloaded} have been downloaded")
-	print(f"Documents {summary.loaded_from_cache} have been loaded from cache")
-	print(f"Documents {summary.processed} have been successfully processed")
-	print(f"Skipped {summary.download_failed} row(s) that failed to download/decode.")
-	print(f"Skipped {summary.unsupported_type} document(s) with an unsupported type.")
-	print(f"Skipped {summary.prepare_failed} row(s) that could not be prepared for parsing.")
-	print(f"Skipped {summary.parse_error} document(s) that failed in parsing.")
-	print(f"Skipped {summary.no_text} document(s) with no text.")
-	print(f"Skipped {summary.keep_error} document(s) that failed in duplicate check or saving.")
-	print(f"Skipped {summary.cache_missing} cached document(s) missing or damaged on disk.")
-	print(f"Skipped {summary.skipped} document(s) in total.")
-	print(f"Skipped {summary.duplicate} document(s) due to duplicate detection.")
-	print(f"Total time: {summary.total_seconds:.1f}s (download {summary.download_seconds:.1f}s, parse {summary.parse_seconds:.1f}s)")
+	logger.info("Requested %s document(s), returned %s.", summary.requested_size, summary.returned_size)
+	logger.info("Dataset ran out of rows: %s", summary.source_exhausted)
+	logger.info("Batches: %s", summary.batches)
+	logger.info("Raw rows %s have been consumed", summary.rows)
+	logger.info("Raw data %s have been downloaded", summary.downloaded)
+	logger.info("Documents %s have been loaded from cache", summary.loaded_from_cache)
+	logger.info("Documents %s have been successfully processed", summary.processed)
+	logger.info("Skipped %s row(s) that failed to download/decode.", summary.download_failed)
+	logger.info("Skipped %s document(s) with an unsupported type.", summary.unsupported_type)
+	logger.info("Skipped %s row(s) that could not be prepared for parsing.", summary.prepare_failed)
+	logger.info("Skipped %s document(s) that failed in parsing.", summary.parse_error)
+	logger.info("Skipped %s document(s) with no text.", summary.no_text)
+	logger.info("Skipped %s document(s) that failed in duplicate check or saving.", summary.keep_error)
+	logger.info("Skipped %s cached document(s) missing or damaged on disk.", summary.cache_missing)
+	logger.info("Skipped %s document(s) in total.", summary.skipped)
+	logger.info("Skipped %s document(s) due to duplicate detection.", summary.duplicate)
+	logger.info("Total time: %.1fs (download %.1fs, parse %.1fs)", summary.total_seconds, summary.download_seconds, summary.parse_seconds)

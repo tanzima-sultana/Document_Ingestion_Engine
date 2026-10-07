@@ -13,6 +13,7 @@ the registry is built lazily inside get_parser instead, once Parser has
 already finished being defined.
 """
 
+import logging
 import abc
 import hashlib
 import signal
@@ -21,7 +22,9 @@ import time
 
 from doc_ingest.schema import Document
 from doc_ingest.raw_data import RawData
-from doc_ingest.text_cleanup import describe_error
+from doc_ingest.error import describe_error
+
+logger = logging.getLogger(__name__)
 
 # Longest time one document may take to parse before it is skipped
 PARSE_TIMEOUT_SECONDS = 120
@@ -83,7 +86,7 @@ def parse_document(raw_data: RawData) -> tuple:
 		parser = parser_cls()
 		document = parser.parse(raw_data)
 	except Exception as error:
-		print(f"Parse failed for document {raw_data.doc_id}: {describe_error(error)}")
+		logger.warning("Parse failed for document %s: %s", raw_data.doc_id, describe_error(error))
 		return raw_data.doc_id, None
 	finally:
 		if timeout_is_set:

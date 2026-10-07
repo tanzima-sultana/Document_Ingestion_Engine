@@ -2,7 +2,7 @@ import dataclasses
 import json
 import os
 
-from doc_ingest.validate import IngestError
+from doc_ingest.error import IngestError
 
 
 @dataclasses.dataclass
@@ -118,3 +118,13 @@ def save_progress(storage_path: str, dataset_name: str, progress: Progress) -> N
 		json.dump(dataclasses.asdict(progress), temporary_file)
 
 	os.replace(temporary_file_path, progress_path)
+
+
+def update_progress(storage_path: str, dataset_name: str, raw_data_count: int, processed_doc_ids: list[str], skipped_doc_ids: list[str]) -> None:
+	"""
+	Input: storage_path, dataset_name, and the progress values (raw_data_count, processed_doc_ids, skipped_doc_ids).
+	Output: None.
+	What it does: builds a Progress from the values and saves it to the dataset's progress file.
+	"""
+	updated_progress = make_progress(dataset_name, raw_data_count, processed_doc_ids, skipped_doc_ids)
+	save_progress(storage_path, dataset_name, updated_progress)

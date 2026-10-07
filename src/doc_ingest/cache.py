@@ -1,8 +1,11 @@
+import logging
 import os
 import json
 
 from doc_ingest.schema import Document
-from doc_ingest.text_cleanup import describe_error
+from doc_ingest.error import describe_error
+
+logger = logging.getLogger(__name__)
 
 # Name of this library's folder inside the user's cache folder
 CACHE_FOLDER_NAME = "doc_ingest"
@@ -73,7 +76,7 @@ def load_processed_document(storage_path: str, dataset_name: str, doc_id: str) -
 			processed_document_json = processed_document_file.read()
 		processed_document = Document.model_validate_json(processed_document_json)
 	except (OSError, ValueError) as load_error:
-		print(f"Cached document {doc_id} is damaged: {processed_document_path} ({describe_error(load_error)})")
+		logger.warning("Cached document %s is damaged: %s (%s)", doc_id, processed_document_path, describe_error(load_error))
 		return None
 
 	return processed_document

@@ -1,6 +1,6 @@
 """
-Tests for dataset_config.py: input path kinds, dataset format/name/size,
-content field and encoding, and Hugging Face helpers.
+Tests for dataset_config.py, dataset_hf.py and document_type.py: input path
+kinds, dataset format/name/size, content field and encoding, and Hugging Face helpers.
 """
 
 import base64
@@ -11,25 +11,27 @@ import unittest
 
 import helpers
 from doc_ingest import dataset_config
+from doc_ingest import dataset_hf
+from doc_ingest import document_type
 
 
 class TestPathKinds(unittest.TestCase):
 
 	def test_is_url(self):
 		"""A URL needs http/https and a host."""
-		self.assertTrue(dataset_config.is_url("https://x.com/a.pdf"))
-		self.assertFalse(dataset_config.is_url("https://"))
-		self.assertFalse(dataset_config.is_url("data/a.pdf"))
+		self.assertTrue(dataset_hf.is_url("https://x.com/a.pdf"))
+		self.assertFalse(dataset_hf.is_url("https://"))
+		self.assertFalse(dataset_hf.is_url("data/a.pdf"))
 
 	def test_hugging_face_name_shape(self):
 		"""Only "owner/name" counts as a Hugging Face name."""
-		self.assertTrue(dataset_config.has_hugging_face_name_shape("owner/name"))
-		self.assertFalse(dataset_config.has_hugging_face_name_shape("imdb"))
-		self.assertFalse(dataset_config.has_hugging_face_name_shape("a/b/c"))
+		self.assertTrue(dataset_hf.has_hugging_face_name_shape("owner/name"))
+		self.assertFalse(dataset_hf.has_hugging_face_name_shape("imdb"))
+		self.assertFalse(dataset_hf.has_hugging_face_name_shape("a/b/c"))
 
 	def test_hugging_face_page_url_to_name(self):
 		"""A dataset page URL becomes "owner/name"; file links stay URLs."""
-		get_name = dataset_config.get_hugging_face_dataset_name_from_url
+		get_name = dataset_hf.get_hugging_face_dataset_name_from_url
 		self.assertEqual(get_name("https://huggingface.co/datasets/owner/name"), "owner/name")
 		self.assertEqual(get_name("https://huggingface.co/datasets/owner/name/tree/main"), "owner/name")
 		self.assertIsNone(get_name("https://huggingface.co/datasets/owner/name/resolve/main/a.jsonl"))
@@ -37,7 +39,7 @@ class TestPathKinds(unittest.TestCase):
 
 	def test_hugging_face_file_url(self):
 		"""An hf:// file path becomes a resolve download URL."""
-		url = dataset_config.get_hugging_face_file_url("hf://datasets/owner/name@abc123/dir/my file.pdf")
+		url = dataset_hf.get_hugging_face_file_url("hf://datasets/owner/name@abc123/dir/my file.pdf")
 		self.assertEqual(url, "https://huggingface.co/datasets/owner/name/resolve/abc123/dir/my%20file.pdf")
 
 	def test_unwrap_file_values(self):
@@ -48,7 +50,7 @@ class TestPathKinds(unittest.TestCase):
 			"zipped": {"bytes": None, "path": "zip://a.docx::hf://datasets/owner/name@rev/b.zip"},
 			"label": 3,
 		}
-		dataset_config.unwrap_file_values(row)
+		dataset_hf.unwrap_file_values(row)
 		self.assertEqual(row["embedded"], b"%PDF-1.4")
 		self.assertEqual(row["linked"], "hf://datasets/owner/name@rev/a.pdf")
 		self.assertIsInstance(row["zipped"], dict)
@@ -76,9 +78,9 @@ class TestContent(unittest.TestCase):
 
 	def test_document_type_from_bytes(self):
 		"""Leading bytes decide the document type."""
-		self.assertEqual(dataset_config.get_document_type_from_bytes(b"%PDF-1.4"), "pdf")
-		self.assertEqual(dataset_config.get_document_type_from_bytes(b"<html><body>x</body></html>"), "html")
-		self.assertEqual(dataset_config.get_document_type_from_bytes(b"just text"), "txt")
+		self.assertEqual(document_type.get_document_type_from_bytes(b"%PDF-1.4"), "pdf")
+		self.assertEqual(document_type.get_document_type_from_bytes(b"<html><body>x</body></html>"), "html")
+		self.assertEqual(document_type.get_document_type_from_bytes(b"just text"), "txt")
 
 
 class TestDatasetConfig(unittest.TestCase):

@@ -8,7 +8,9 @@
 from doc_ingest.ingest import ingest_documents
 
 if __name__ == "__main__":
-	documents = ingest_documents(100, "pixparse/pdfa-eng-wds")
+	ingest_result = ingest_documents(100, "pixparse/pdfa-eng-wds")
+	documents = ingest_result.documents
+	summary = ingest_result.summary
 ```
 
 - Needed only when the call sits at the top level of the script being run (`python my_script.py`).

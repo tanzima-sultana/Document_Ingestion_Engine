@@ -32,7 +32,7 @@ LOG="logs/log_${SIZE}_download${DOWNLOAD_WORKERS}_parse${PARSE_WORKERS}.txt"
 
 # run
 
-python3 src/doc_ingest/__init__.py \
+python3 -m doc_ingest \
 	--size "$SIZE" \
 	--input_path "$INPUT_PATH" \
 	--download_workers "$DOWNLOAD_WORKERS" \

@@ -14,6 +14,24 @@ from doc_ingest.raw_data import RawData
 from doc_ingest.schema import DocumentType
 
 
+class FakePage:
+	def __init__(self, text):
+		self.text = text
+
+	def extract_text(self):
+		"""Returns the page text, or raises it if it is an error."""
+		if isinstance(self.text, Exception):
+			raise self.text
+		return self.text
+
+
+class FakeReader:
+	def __init__(self, page_texts):
+		self.pages = []
+		for page_text in page_texts:
+			self.pages.append(FakePage(page_text))
+
+
 class TestPDF(unittest.TestCase):
 
 	def setUp(self):
@@ -65,34 +83,43 @@ class TestPDF(unittest.TestCase):
 		doc_id, document = parse_document(RawData("doc2", "docx", raw_path, "a.docx"))
 		self.assertIsNone(document)
 
+	def test_pdf_properties(self):
+		"""Title, author and creation date are read from the PDF."""
+		pdf_bytes = helpers.make_pdf([["hello"]], {"Title": " My Title ", "Author": "Jane", "CreationDate": "D:20240301101500+00'00'"})
+		document = PDFParser().parse(self.make_raw_data("a.pdf", pdf_bytes))
+		self.assertEqual(document.metadata.title, "My Title")
+		self.assertEqual(document.metadata.author, "Jane")
+		self.assertEqual(document.metadata.creation_date, "2024-03-01T10:15:00+00:00")
+
+	def test_bad_date_is_none(self):
+		"""A date pypdf cannot parse becomes None; the rest is kept."""
+		pdf_bytes = helpers.make_pdf([["hello"]], {"Author": "Bob", "CreationDate": "garbage"})
+		with self.assertLogs("doc_ingest", level="WARNING"):
+			document = PDFParser().parse(self.make_raw_data("a.pdf", pdf_bytes))
+		self.assertEqual(document.metadata.author, "Bob")
+		self.assertIsNone(document.metadata.creation_date)
+
+	def test_bad_page_does_not_lose_document(self):
+		"""A page that fails to extract is given as an empty page."""
+		with self.assertLogs("doc_ingest", level="WARNING"):
+			page_texts = PDFParser().extract_page_texts(FakeReader(["good page", ValueError("broken")]))
+		self.assertEqual(page_texts, ["good page", ""])
+
 
 class TestMetadata(unittest.TestCase):
 
-	def test_pdf_metadata(self):
-		"""Size, hash, title, author and date are filled in."""
-		pdf_bytes = helpers.make_pdf([["hello"]], {"Title": " My Title ", "Author": "Jane", "CreationDate": "D:20240301101500+00'00'"})
+	def test_generic_metadata(self):
+		"""Source, size and hash are set; properties are left for the parser."""
+		pdf_bytes = helpers.make_pdf([["hello"]], {"Title": "My Title", "Author": "Jane"})
 		raw_data = RawData("doc1", "pdf", "raw/doc1.pdf", "data/a.pdf")
 		metadata = extract_metadata(raw_data, pdf_bytes)
 		self.assertEqual(metadata.source, "data/a.pdf")
 		self.assertEqual(metadata.file_size_bytes, len(pdf_bytes))
 		self.assertEqual(metadata.content_hash, hashlib.sha256(pdf_bytes).hexdigest())
-		self.assertEqual(metadata.title, "My Title")
-		self.assertEqual(metadata.author, "Jane")
-		self.assertEqual(metadata.creation_date, "2024-03-01T10:15:00+00:00")
-		self.assertIsNone(metadata.minhash_signature)
-
-	def test_bad_date_is_none(self):
-		"""A date pypdf cannot parse becomes None; the rest is kept."""
-		pdf_bytes = helpers.make_pdf([["hello"]], {"Author": "Bob", "CreationDate": "garbage"})
-		metadata = extract_metadata(RawData("doc1", "pdf", "raw/doc1.pdf", "a.pdf"), pdf_bytes)
-		self.assertEqual(metadata.author, "Bob")
-		self.assertIsNone(metadata.creation_date)
-
-	def test_non_pdf_has_no_properties(self):
-		"""Types without a property reader keep title/author/date as None."""
-		metadata = extract_metadata(RawData("doc1", "txt", "raw/doc1.txt", "a.txt"), b"hello")
-		self.assertEqual(metadata.file_size_bytes, 5)
 		self.assertIsNone(metadata.title)
+		self.assertIsNone(metadata.author)
+		self.assertIsNone(metadata.creation_date)
+		self.assertIsNone(metadata.minhash_signature)
 
 
 if __name__ == "__main__":

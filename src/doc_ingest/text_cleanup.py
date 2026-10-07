@@ -2,12 +2,11 @@
 text_cleanup.py
 
 Cleans a document's text: strips repeated headers/footers and collapses
-repeated whitespace and blank lines.
+repeated whitespace and blank lines. Works on plain text from any format;
+each parser extracts its own page texts and passes them in.
 """
 
 import re
-
-import pypdf
 
 
 # A first/last line is a header/footer if it repeats on this fraction of pages
@@ -22,19 +21,14 @@ ICON_CHARACTERS_PATTERN = re.compile("[\ue000-\uf8ff\U000f0000-\U0010ffff]")
 DIGITS_PATTERN = re.compile(r"\d+")
 
 
-def extract_clean_text(reader: pypdf.PdfReader) -> str:
+def clean_text(page_texts: list[str]) -> str:
 	"""
-	Input: pypdf reader of a PDF. Output: its cleaned text.
+	Input: the text of each page (or section) of a document. Output: its cleaned text.
 	Removes icon characters and extra whitespace from each line, drops
 	header/footer lines and repeated blank lines, joins pages with a blank line.
 	"""
 	pages_lines = []
-	for page in reader.pages:
-		try:
-			page_text = page.extract_text()
-		except Exception as error:
-			print(f"Could not extract page text: {describe_error(error)}")
-			page_text = ""
+	for page_text in page_texts:
 		page_text = fix_broken_characters(page_text)
 
 		page_lines = []
@@ -69,21 +63,12 @@ def extract_clean_text(reader: pypdf.PdfReader) -> str:
 def fix_broken_characters(text: str) -> str:
 	"""
 	Input: text. Output: the same text, safe to save as UTF-8.
-	pypdf can return a character split into two halves (a UTF-16 surrogate
-	pair, e.g. math letters); pairs are joined back, lone halves become "\ufffd".
+	Text extractors such as pypdf can return a character split into two halves (a UTF-16
+	surrogate pair, e.g. math letters); pairs are joined back, lone halves become "\ufffd".
 	"""
 	text_bytes = text.encode("utf-16-le", "surrogatepass")
 	fixed_text = text_bytes.decode("utf-16-le", "replace")
 	return fixed_text
-
-
-def describe_error(error: Exception) -> str:
-	"""
-	Input: an error. Output: "<ErrorType>: <message>" as printable text.
-	Broken characters in the message are fixed, so printing it cannot fail.
-	"""
-	error_text = f"{type(error).__name__}: {error}"
-	return fix_broken_characters(error_text)
 
 
 def find_header_footer_keys(pages_lines: list[list[str]]) -> set[str]:
