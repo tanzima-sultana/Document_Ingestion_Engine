@@ -70,10 +70,10 @@ class RawDataFetcher:
 	its document type, and saves it to raw/ as a RawData.
 	"""
 
-	def __init__(self, input_path: str, output_path:str, dataset_config: DatasetConfig, download_workers: int):
+	def __init__(self, input_path: str, storage_path: str, dataset_config: DatasetConfig, download_workers: int):
 		"""
 		Input: input_path - the dataset path, URL or Hugging Face name;
-			output_path - folder that raw/ is saved under; dataset_config -
+			storage_path - storage folder that raw/ is saved under; dataset_config -
 			the dataset's DatasetConfig; download_workers - rows
 			downloaded/decoded at the same time.
 		Output: none.
@@ -81,7 +81,7 @@ class RawDataFetcher:
 			row number starts at 0 and is set by get_iterator.
 		"""
 		self.input_path = input_path
-		self.output_path = output_path
+		self.storage_path = storage_path
 		self.dataset_config = dataset_config
 		self.download_workers = download_workers
 		self.next_row_number = 0
@@ -386,14 +386,14 @@ class RawDataFetcher:
 			doc_type - its document type from get_document_type.
 		Output: path of the saved raw file.
 		What it does: writes the bytes to
-			"<output_path>/<dataset name>/data/raw/<doc_id>.<doc_type>",
+			"<storage_path>/<dataset name>/data/raw/<doc_id>.<doc_type>",
 			creating the raw/ folder if needed. The document type is used as
 			the extension rather than the dataset's extension, because a
 			JSONL or Hugging Face dataset holds documents of another type
 			(e.g. a PDF inside a JSONL record is saved as ".pdf").
 		"""
 		raw_file_name = f"{doc_id}.{doc_type}"
-		raw_folder_path = f"{self.output_path}/{self.dataset_config.name}/data/raw/"
+		raw_folder_path = f"{self.storage_path}/{self.dataset_config.name}/data/raw/"
 		raw_file_path = os.path.join(raw_folder_path, raw_file_name)
 
 		os.makedirs(raw_folder_path, exist_ok=True)

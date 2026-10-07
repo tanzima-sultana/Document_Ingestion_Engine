@@ -7,7 +7,7 @@ import argparse
 import os
 import sys
 
-from doc_ingest import validate
+from doc_ingest import cache
 from doc_ingest.dataset_config import normalize_input_path
 from doc_ingest.ingest import DEFAULT_DOWNLOAD_WORKERS
 from doc_ingest.ingest import ingest_documents
@@ -17,8 +17,8 @@ def parse_args(argument_list):
 	Input:
 		argument_list - list of command line strings, usually sys.argv[1:].
 	Output:
-		argparse.Namespace with size, input_path, output_path,
-		download_workers and parse_workers.
+		argparse.Namespace with size, input_path, download_workers and
+		parse_workers.
 	What it does:
 		Reads the options run.sh passes in. The worker counts are optional.
 		Stops with an error message if a required option is missing or a
@@ -38,12 +38,6 @@ def parse_args(argument_list):
 		type=str,
 		required=True,
 		help="Local path, URL, or dataset name to read documents from.",
-	)
-	argument_parser.add_argument(
-		"--output_path",
-		type=str,
-		required=True,
-		help="Folder where the output JSON files are written.",
 	)
 	argument_parser.add_argument(
 		"--download_workers",
@@ -67,16 +61,14 @@ if __name__ == "__main__":
 	size = args.size
 	# A Hugging Face dataset page URL is turned into the dataset name
 	input_path = normalize_input_path(args.input_path)
-	output_path = args.output_path 
+	storage_path = cache.get_storage_path()
 	download_workers = args.download_workers
 	parse_workers = args.parse_workers
-
-	os.makedirs(args.output_path, exist_ok=True)
 
 	print("Starting document ingestion")
 	print("  size        : " + str(size))
 	print("  input_path  : " + input_path)
-	print("  output_path : " + output_path)
+	print("  storage_path : " + storage_path)
 	print("  download_workers : " + str(download_workers))
 	if parse_workers is None:
 		print("  parse_workers    : number of CPU cores")
@@ -84,23 +76,20 @@ if __name__ == "__main__":
 		print("  parse_workers    : " + str(parse_workers))
 
 
-	# 1. Validation
-	# A failed check prints a clean message (no traceback) and stops the program
+	# Ingestion. ingest_documents validates the inputs first.
+	# A ValueError (failed check or damaged progress file) prints a clean
+	# message (no traceback) and stops the program
 	try:
-		validate.validate_inputs(size, input_path, output_path)
-	except (TypeError, ValueError) as validation_error:
+		documents = ingest_documents(
+			size,
+			input_path,
+			download_workers=download_workers,
+			parse_workers=parse_workers,
+		)
+	except ValueError as ingestion_error:
 		sys.stdout.flush()
-		print("Validation failed: " + str(validation_error), file=sys.stderr)
+		print("Ingestion stopped: " + str(ingestion_error), file=sys.stderr)
 		sys.exit(1)
-
-	# 2. Ingestion
-	documents = ingest_documents(
-		size,
-		input_path,
-		output_path,
-		download_workers=download_workers,
-		parse_workers=parse_workers,
-	)
 
 	print("Document ingestion finished")
 

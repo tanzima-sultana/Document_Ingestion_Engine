@@ -19,12 +19,13 @@ export PYTHONPATH="$(pwd)/src"
 
 SIZE=5000
 INPUT_PATH="https://huggingface.co/datasets/superdoc-dev/docx-corpus"
-OUTPUT_PATH="outputs/"
+# Benchmark runs use their own storage folder, never the shared ~/.cache/doc_ingest
+export DOC_INGEST_CACHE_DIR="$(pwd)/outputs"
 DOWNLOAD_WORKERS="${1:-64}"
 PARSE_WORKERS="${2:-16}"
 
-# Always start from an empty output folder; logs are kept
-rm -rf "${OUTPUT_PATH:?}"
+# Always start from an empty storage folder; logs are kept
+rm -rf "${DOC_INGEST_CACHE_DIR:?}"
 
 mkdir -p logs
 LOG="logs/log_${SIZE}_download${DOWNLOAD_WORKERS}_parse${PARSE_WORKERS}.txt"
@@ -34,7 +35,6 @@ LOG="logs/log_${SIZE}_download${DOWNLOAD_WORKERS}_parse${PARSE_WORKERS}.txt"
 python3 src/doc_ingest/__init__.py \
 	--size "$SIZE" \
 	--input_path "$INPUT_PATH" \
-	--output_path "$OUTPUT_PATH" \
 	--download_workers "$DOWNLOAD_WORKERS" \
 	--parse_workers "$PARSE_WORKERS" \
 	2>&1 | tee "$LOG"

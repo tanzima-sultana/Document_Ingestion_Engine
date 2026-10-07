@@ -8,6 +8,7 @@ import json
 import os
 import tempfile
 import unittest
+import unittest.mock
 
 import helpers
 from doc_ingest.dataset_config import get_dataset_name
@@ -38,7 +39,8 @@ class TestIngestDocuments(unittest.TestCase):
 		"""Runs ingest_documents quietly; returns (documents, printed output)."""
 		printed_output = io.StringIO()
 		with contextlib.redirect_stdout(printed_output):
-			documents = ingest_documents(size, self.input_folder, self.output_path, download_workers=2, parse_workers=2)
+			with unittest.mock.patch("doc_ingest.cache.get_storage_path", return_value=self.output_path):
+				documents = ingest_documents(size, self.input_folder, download_workers=2, parse_workers=2)
 		return documents, printed_output.getvalue()
 
 	def read_progress(self):
@@ -53,7 +55,7 @@ class TestIngestDocuments(unittest.TestCase):
 		documents, printed_output = self.run_ingest(20)
 
 		sources = []
-		for document in documents.values():
+		for document in documents:
 			sources.append(os.path.basename(document.metadata.source))
 		sources.sort()
 		self.assertEqual(sources, ["a_report.pdf", "c_weather.pdf", "d_memo.pdf"])

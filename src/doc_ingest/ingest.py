@@ -12,6 +12,7 @@ from doc_ingest.summary import print_run_summary
 
 from doc_ingest import dataset_config
 from doc_ingest import progress
+from doc_ingest import validate
 from doc_ingest import cache
 from doc_ingest import parser
 
@@ -21,21 +22,23 @@ PARSE_DOC_COUNT = 16
 # Default number of documents downloaded/decoded at the same time
 DEFAULT_DOWNLOAD_WORKERS = 64
 
-def ingest_documents(size: int, input_path: str, output_path: str, *, download_workers: int = DEFAULT_DOWNLOAD_WORKERS, parse_workers: int | None = None) -> dict[str, Document]:
+def ingest_documents(size: int, input_path: str, *, download_workers: int = DEFAULT_DOWNLOAD_WORKERS, parse_workers: int | None = None) -> list[Document]:
 	"""
 	Input:
 		size - maximum number of documents to return.
 		input_path - the --input_path value: a local file or folder, a web
 		URL, or a Hugging Face dataset name.
-		output_path - the --output_path folder, which also holds the cache
-		of processed documents.
 		download_workers - optional; documents downloaded/decoded at the
 		same time (default DEFAULT_DOWNLOAD_WORKERS).
 		parse_workers - optional; documents parsed at the same time, one
 		process each (default: number of CPU cores).
 	Output:
-		A dict that maps each document id to its Document.
+		A list of the collected Documents.
 	What it does:
+		First checks size, input_path and the storage folder with
+		validate.validate_inputs, which raises TypeError or ValueError if
+		a check fails. Raw files, processed documents and progress are
+		stored under cache.get_storage_path().
 		Works out the dataset config, loads the saved progress for it, and
 		reads back documents that were already processed from the cache.
 		A processed document whose cached file is missing or damaged is
@@ -50,6 +53,10 @@ def ingest_documents(size: int, input_path: str, output_path: str, *, download_w
 	"""
 	run_start = time.perf_counter()
 	documents = {}
+	storage_path = cache.get_storage_path()
+
+	# 0. Validate inputs before any work is done
+	validate.validate_inputs(size, input_path, storage_path)
 
 	summary = Summary()
 	summary.requested_size = size
@@ -58,7 +65,7 @@ def ingest_documents(size: int, input_path: str, output_path: str, *, download_w
 	db_config = dataset_config.get_dataset_config(input_path)
 
 	# 2. Load progress
-	saved_progress = progress.load_progress(output_path, db_config.name)
+	saved_progress = progress.load_progress(storage_path, db_config.name)
 
 	raw_data_count = saved_progress.raw_data_count
 	processed_doc_ids = []
@@ -73,7 +80,7 @@ def ingest_documents(size: int, input_path: str, output_path: str, *, download_w
 		doc_id = saved_progress.processed_doc_ids[cached_index]
 		cached_index += 1
 
-		cached_doc = cache.load_processed_document(output_path, db_config.name, doc_id)
+		cached_doc = cache.load_processed_document(storage_path, db_config.name, doc_id)
 		# If a processed doc is missing or damaged on disk
 		if cached_doc is None:
 			print(f"Processed document {doc_id} is missing or damaged on disk, marking it as skipped.")
@@ -98,16 +105,17 @@ def ingest_documents(size: int, input_path: str, output_path: str, *, download_w
 				all_processed_doc_ids,
 				list(skipped_doc_ids),
 			)
-			progress.save_progress(output_path, db_config.name, updated_progress)
+			progress.save_progress(storage_path, db_config.name, updated_progress)
 			print(f"Loaded {len(documents)} already processed document(s). Nothing new to process.")
 			summary.returned_size = len(documents)
 			summary.total_seconds = time.perf_counter() - run_start
 			print_run_summary(summary)
-			return documents
+			document_list = list(documents.values())
+			return document_list
 
 
 	# 4. Fetch raw data in batches, then process each batch
-	raw_data_fetcher = RawDataFetcher(input_path, output_path, db_config, download_workers)
+	raw_data_fetcher = RawDataFetcher(input_path, storage_path, db_config, download_workers)
 	row_iterator = raw_data_fetcher.get_iterator(raw_data_count)
 
 	batch_number = 0
@@ -185,7 +193,7 @@ def ingest_documents(size: int, input_path: str, output_path: str, *, download_w
 				
 				processed_doc_ids.append(doc_id)
 				documents[doc_id] = doc
-				cache.save_processed_document(output_path, db_config.name, doc)
+				cache.save_processed_document(storage_path, db_config.name, doc)
 				summary.processed += 1
 
 			summary.parse_seconds += time.perf_counter() - parse_start
@@ -197,7 +205,7 @@ def ingest_documents(size: int, input_path: str, output_path: str, *, download_w
 				processed_doc_ids,
 				list(skipped_doc_ids),
 			)
-			progress.save_progress(output_path, db_config.name, updated_progress)
+			progress.save_progress(storage_path, db_config.name, updated_progress)
 
 	# Run
 	summary.returned_size = len(documents)
@@ -206,5 +214,6 @@ def ingest_documents(size: int, input_path: str, output_path: str, *, download_w
 	summary.total_seconds = time.perf_counter() - run_start
 	print_run_summary(summary)
 
-	return documents
+	document_list = list(documents.values())
+	return document_list
 

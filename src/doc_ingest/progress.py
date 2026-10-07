@@ -33,26 +33,26 @@ def make_progress(dataset_name: str, raw_data_count: int, processed_doc_ids: lis
 	return progress
 
 
-def get_progress_path(output_path:str, dataset_name: str) -> str:
+def get_progress_path(storage_path: str, dataset_name: str) -> str:
 	"""
 	Input:
-		output_path - the --output_path folder.
+		storage_path - the storage folder (cache.get_storage_path()).
 		dataset_name - name of the dataset (from get_dataset_name).
 	Output:
 		Path of this dataset's progress file, for example
-		"outputs/docx-corpus/progress.json".
+		"~/.cache/doc_ingest/docx-corpus/progress.json".
 	What it does:
 		Keeps the progress file next to the dataset's cached documents, so
-		the progress always describes the cache in the same output folder.
+		the progress always describes the cache in the same storage folder.
 	"""
-	progress_path = os.path.join(f"{output_path}/{dataset_name}/", f"progress.json")
+	progress_path = os.path.join(f"{storage_path}/{dataset_name}/", f"progress.json")
 	return progress_path
 
 
-def load_progress(output_path:str, dataset_name: str) -> Progress:
+def load_progress(storage_path: str, dataset_name: str) -> Progress:
 	"""
 	Input:
-		output_path - the --output_path folder.
+		storage_path - the storage folder (cache.get_storage_path()).
 		dataset_name - name of the dataset (from get_dataset_name).
 	Output:
 		The saved Progress for this dataset, or an empty Progress (count 0,
@@ -61,7 +61,7 @@ def load_progress(output_path:str, dataset_name: str) -> Progress:
 		Reads the dataset's progress file. Raises ValueError if the file is
 		damaged, is missing a field, or belongs to a different dataset.
 	"""
-	progress_path = get_progress_path(output_path, dataset_name)
+	progress_path = get_progress_path(storage_path, dataset_name)
 
 	if not os.path.exists(progress_path):
 		empty_progress = make_progress(dataset_name, 0, [], [])
@@ -92,10 +92,10 @@ def load_progress(output_path:str, dataset_name: str) -> Progress:
 	return progress
 
 
-def save_progress(output_path:str, dataset_name: str, progress: Progress) -> None:
+def save_progress(storage_path: str, dataset_name: str, progress: Progress) -> None:
 	"""
 	Input:
-		output_path - the --output_path folder.
+		storage_path - the storage folder (cache.get_storage_path()).
 		dataset_name - name of the dataset (from get_dataset_name).
 		progress - the Progress to save.
 	Output:
@@ -105,7 +105,7 @@ def save_progress(output_path:str, dataset_name: str, progress: Progress) -> Non
 		temporary file and then swaps it into place, so a crash while
 		writing never leaves a half-written progress file behind.
 	"""
-	progress_path = get_progress_path(output_path, dataset_name)
+	progress_path = get_progress_path(storage_path, dataset_name)
 	temporary_file_path = progress_path + ".tmp"
 
 	progress_folder = os.path.dirname(progress_path)
