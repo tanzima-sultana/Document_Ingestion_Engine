@@ -3,6 +3,7 @@ Tests for dedup.py: exact and near duplicate detection.
 """
 
 import unittest
+import unittest.mock
 
 from doc_ingest.dedup import Deduplicator
 from doc_ingest.schema import Document
@@ -65,6 +66,28 @@ class TestDeduplicator(unittest.TestCase):
 		self.assertTrue(deduplicator.add_if_new(document))
 		self.assertIsNone(document.metadata.minhash_signature)
 
+
+	def test_cached_document_reuses_stored_signature(self):
+		"""A cached document's saved MinHash is reused, not computed again, and still finds near duplicates."""
+		first_run = Deduplicator()
+		cached_document = make_document("a", "\n".join(make_paragraphs("finance")), "hash-a")
+		first_run.add_if_new(cached_document)
+
+		resumed_run = Deduplicator()
+		with unittest.mock.patch.object(resumed_run, "make_minhash", side_effect=AssertionError("MinHash was computed again")):
+			resumed_run.add(cached_document)
+
+		lines = make_paragraphs("finance")
+		lines[5] = "This paragraph was rewritten completely by the editor."
+		self.assertFalse(resumed_run.add_if_new(make_document("b", "\n".join(lines), "hash-b")))
+
+	def test_wrong_length_signature_is_computed_again(self):
+		"""A saved signature with the wrong number of values is ignored and the MinHash is computed."""
+		deduplicator = Deduplicator()
+		cached_document = make_document("a", "\n".join(make_paragraphs("finance")), "hash-a")
+		cached_document.metadata.minhash_signature = [1, 2, 3]
+		deduplicator.add(cached_document)
+		self.assertFalse(deduplicator.add_if_new(make_document("b", "\n".join(make_paragraphs("finance")), "hash-b")))
 
 if __name__ == "__main__":
 	unittest.main()

@@ -10,6 +10,9 @@ from doc_ingest.schema import Document
 from doc_ingest.settings import DEFAULT_DEDUP_THRESHOLD
 
 NUM_PERM = 128
+# Hashing scheme of every MinHash. Named explicitly so a signature saved in the cache is rebuilt with the
+# scheme it was made with (datasketch's default for new MinHashes since 2.0).
+MINHASH_SCHEME = "affine32"
 _SHINGLE_SIZE = 5
 
 class Deduplicator:
@@ -41,7 +44,7 @@ class Deduplicator:
 			similarity of the two original shingle sets without needing to
 			store or scan either set directly.
 		"""
-		minhash = datasketch.MinHash(num_perm=NUM_PERM)
+		minhash = datasketch.MinHash(num_perm=NUM_PERM, scheme=MINHASH_SCHEME)
 		for shingle in shingles:
 			shingle_bytes = shingle.encode("utf-8")
 			minhash.update(shingle_bytes)
@@ -109,11 +112,35 @@ class Deduplicator:
 		Output: none.
 		What it does: records the document's content hash and MinHash
 			without checking it. Used for documents loaded from the cache.
+			The MinHash saved in the document is reused when it is usable,
+			so a resumed run does not compute it again.
 		"""
 		self.seen_content_hashes.add(document.metadata.content_hash)
-		shingles = self.make_shingles(document.text)
-		if len(shingles) > 0:
-			self.lsh_index.insert(document.id, self.make_minhash(shingles))
+
+		minhash = self.load_stored_minhash(document)
+		if minhash is None:
+			shingles = self.make_shingles(document.text)
+			if len(shingles) == 0:
+				return
+			minhash = self.make_minhash(shingles)
+
+		self.lsh_index.insert(document.id, minhash)
+
+	def load_stored_minhash(self, document: Document) -> datasketch.MinHash | None:
+		"""
+		Input: document - a Document, usually loaded from the cache.
+		Output: a MinHash built from document.metadata.minhash_signature, or None if there is none or
+			it does not have NUM_PERM values (e.g. saved before NUM_PERM changed), so it must be computed.
+		"""
+		stored_signature = document.metadata.minhash_signature
+		if stored_signature is None:
+			return None
+
+		if len(stored_signature) != NUM_PERM:
+			return None
+
+		minhash = datasketch.MinHash(num_perm=NUM_PERM, hashvalues=stored_signature, scheme=MINHASH_SCHEME)
+		return minhash
 
 	def add_if_new(self, document: Document) -> bool:
 		"""
