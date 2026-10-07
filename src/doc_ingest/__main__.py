@@ -10,9 +10,15 @@ import os
 import sys
 
 from doc_ingest import cache
-from doc_ingest.ingest import DEFAULT_DOWNLOAD_WORKERS
 from doc_ingest.ingest import ingest_documents
 from doc_ingest.error import IngestError
+from doc_ingest.settings import DEFAULT_DEDUP_THRESHOLD
+from doc_ingest.settings import DEFAULT_DOWNLOAD_WORKERS
+from doc_ingest.settings import DEFAULT_HUGGING_FACE_SPLIT
+from doc_ingest.settings import DEFAULT_MAX_BATCH_ROWS
+from doc_ingest.settings import DEFAULT_PARSE_TIMEOUT_SECONDS
+from doc_ingest.settings import DownloadSettings
+from doc_ingest.settings import ProcessSettings
 
 
 def parse_args(argument_list):
@@ -20,12 +26,13 @@ def parse_args(argument_list):
 	Input:
 		argument_list - list of command line strings, usually sys.argv[1:].
 	Output:
-		argparse.Namespace with size, input_path, download_workers and
-		parse_workers.
+		argparse.Namespace with size, input_path, and every download and
+		process setting.
 	What it does:
-		Reads the options run.sh passes in. The worker counts are optional.
-		Stops with an error message if a required option is missing or a
-		number option is not a whole number.
+		Reads the options run.sh passes in. Only size and input_path are
+		required; every setting is optional and shown in its own --help
+		group. Stops with an error message if a required option is missing
+		or a number option is not a number.
 	"""
 	argument_parser = argparse.ArgumentParser(
 		description="Ingest documents into clean, deduplicated JSON."
@@ -42,17 +49,45 @@ def parse_args(argument_list):
 		required=True,
 		help="Local path, or Hugging Face dataset name (or its page URL), to read documents from.",
 	)
-	argument_parser.add_argument(
+
+	download_group = argument_parser.add_argument_group("download settings")
+	download_group.add_argument(
 		"--download_workers",
 		type=int,
 		default=DEFAULT_DOWNLOAD_WORKERS,
 		help="Number of documents downloaded/decoded at the same time (default: %(default)s).",
 	)
-	argument_parser.add_argument(
+	download_group.add_argument(
+		"--max_batch_rows",
+		type=int,
+		default=DEFAULT_MAX_BATCH_ROWS,
+		help="Most rows read in one batch; limits memory use (default: %(default)s).",
+	)
+	download_group.add_argument(
+		"--hugging_face_split",
+		type=str,
+		default=DEFAULT_HUGGING_FACE_SPLIT,
+		help="Split read from a Hugging Face dataset (default: %(default)s).",
+	)
+
+	process_group = argument_parser.add_argument_group("process settings")
+	process_group.add_argument(
 		"--parse_workers",
 		type=int,
 		default=None,
 		help="Number of documents parsed at the same time (default: number of CPU cores).",
+	)
+	process_group.add_argument(
+		"--parse_timeout_seconds",
+		type=int,
+		default=DEFAULT_PARSE_TIMEOUT_SECONDS,
+		help="Longest time one document may take to parse before it is skipped (default: %(default)s).",
+	)
+	process_group.add_argument(
+		"--dedup_threshold",
+		type=float,
+		default=DEFAULT_DEDUP_THRESHOLD,
+		help="Similarity at or above which two documents are near-duplicates (default: %(default)s).",
 	)
 	parsed_arguments = argument_parser.parse_args(argument_list)
 	return parsed_arguments
@@ -71,18 +106,23 @@ def main():
 	size = args.size
 	input_path = args.input_path
 	storage_path = cache.get_storage_path()
-	download_workers = args.download_workers
-	parse_workers = args.parse_workers
+	download_settings = DownloadSettings(
+		download_workers=args.download_workers,
+		max_batch_rows=args.max_batch_rows,
+		hugging_face_split=args.hugging_face_split,
+	)
+	process_settings = ProcessSettings(
+		parse_workers=args.parse_workers,
+		parse_timeout_seconds=args.parse_timeout_seconds,
+		dedup_threshold=args.dedup_threshold,
+	)
 
 	print("Starting document ingestion")
 	print("  size        : " + str(size))
 	print("  input_path  : " + input_path)
 	print("  storage_path : " + storage_path)
-	print("  download_workers : " + str(download_workers))
-	if parse_workers is None:
-		print("  parse_workers    : number of CPU cores")
-	else:
-		print("  parse_workers    : " + str(parse_workers))
+	print("  download_settings : " + str(download_settings))
+	print("  process_settings  : " + str(process_settings))
 
 
 	# Ingestion. ingest_documents validates the inputs first.
@@ -93,8 +133,8 @@ def main():
 		ingest_result = ingest_documents(
 			size,
 			input_path,
-			download_workers=download_workers,
-			parse_workers=parse_workers,
+			download_settings=download_settings,
+			process_settings=process_settings,
 		)
 	except IngestError as ingestion_error:
 		sys.stdout.flush()

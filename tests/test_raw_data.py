@@ -12,6 +12,7 @@ import unittest
 import helpers
 from doc_ingest.dataset_config import get_dataset_config
 from doc_ingest.raw_data import RawDataFetcher
+from doc_ingest.settings import DownloadSettings
 
 
 class TestRawDataFetcher(unittest.TestCase):
@@ -27,7 +28,7 @@ class TestRawDataFetcher(unittest.TestCase):
 	def fetch_all(self, input_path, rows_to_skip):
 		"""Fetches one batch of up to 100 rows and returns it."""
 		config = get_dataset_config(input_path)
-		fetcher = RawDataFetcher(input_path, self.output_path, config, 4)
+		fetcher = RawDataFetcher(input_path, self.output_path, config, DownloadSettings(download_workers=4))
 		row_iterator = fetcher.get_iterator(rows_to_skip)
 		return fetcher.fetch_raw_batch(row_iterator, 100)
 

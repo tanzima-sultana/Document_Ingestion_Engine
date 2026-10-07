@@ -12,7 +12,6 @@ from typing import Iterator
 
 from doc_ingest.dataset_config import DatasetConfig
 from doc_ingest.dataset_config import get_content_encoding
-from doc_ingest.dataset_hf import HUGGING_FACE_SPLIT
 from doc_ingest.dataset_hf import URL_TIMEOUT_SECONDS
 from doc_ingest.dataset_hf import build_url_request
 from doc_ingest.dataset_hf import get_hugging_face_file_url
@@ -22,14 +21,10 @@ from doc_ingest.dataset_local import list_dataset_files
 from doc_ingest.document_type import EXTENSION_TO_DOCUMENT_TYPE
 from doc_ingest.document_type import get_document_type_from_bytes
 from doc_ingest.document_type import get_extension_of_file
+from doc_ingest.settings import DownloadSettings
 from doc_ingest.error import describe_error
 
 logger = logging.getLogger(__name__)
-
-# Largest number of rows read in one batch, so a large request does not
-# hold every document's bytes in memory at once. The caller asks again
-# for the rest.
-MAX_BATCH_ROWS = 256
 
 @dataclasses.dataclass
 class RawData:
@@ -75,12 +70,12 @@ class RawDataFetcher:
 	its document type, and saves it to raw/ as a RawData.
 	"""
 
-	def __init__(self, input_path: str, storage_path: str, dataset_config: DatasetConfig, download_workers: int):
+	def __init__(self, input_path: str, storage_path: str, dataset_config: DatasetConfig, download_settings: DownloadSettings):
 		"""
 		Input: input_path - the local dataset path or Hugging Face name;
 			storage_path - storage folder that raw/ is saved under; dataset_config -
-			the dataset's DatasetConfig; download_workers - rows
-			downloaded/decoded at the same time.
+			the dataset's DatasetConfig; download_settings - download workers,
+			rows per batch and Hugging Face split.
 		Output: none.
 		What it does: stores the inputs for the other methods. The next
 			row number starts at 0 and is set by get_iterator.
@@ -88,7 +83,7 @@ class RawDataFetcher:
 		self.input_path = input_path
 		self.storage_path = storage_path
 		self.dataset_config = dataset_config
-		self.download_workers = download_workers
+		self.download_settings = download_settings
 		self.next_row_number = 0
 
 	def get_iterator(self, raw_data_count: int) -> Iterator:
@@ -127,7 +122,7 @@ class RawDataFetcher:
 		# Imported here so local datasets do not pay the import cost.
 		from datasets import load_dataset
 
-		dataset = load_dataset(self.input_path, split=HUGGING_FACE_SPLIT, streaming=True)
+		dataset = load_dataset(self.input_path, split=self.download_settings.hugging_face_split, streaming=True)
 		# Keep file columns (e.g. Pdf) as raw bytes instead of opening them
 		dataset = dataset.decode(False)
 		dataset = dataset.skip(rows_to_skip)
@@ -383,7 +378,9 @@ class RawDataFetcher:
 		Output: a RawDataBatch with a RawData for each saved document of
 			this batch.
 		What it does: reads up to rows_needed rows, but never more than
-			MAX_BATCH_ROWS, decodes/downloads them in parallel, finds each
+			download_settings.max_batch_rows (so a large request does not hold
+			every document's bytes in memory at once; the caller asks again for
+			the rest), decodes/downloads them in parallel, finds each
 			decoded document's type and source path, and saves it to
 			raw/. Advances next_row_number by the rows read. Rows that fail to
 			decode or have an unsupported type are counted in
@@ -393,8 +390,8 @@ class RawDataFetcher:
 			stops the run because every later row would fail too.
 		"""
 		rows_to_read = rows_needed
-		if rows_to_read > MAX_BATCH_ROWS:
-			rows_to_read = MAX_BATCH_ROWS
+		if rows_to_read > self.download_settings.max_batch_rows:
+			rows_to_read = self.download_settings.max_batch_rows
 
 		rows_to_decode = []
 		rows_read = 0
@@ -409,7 +406,7 @@ class RawDataFetcher:
 			rows_to_decode.append(row)
 
 		# executor.map returns results in the same order as rows_to_decode
-		with concurrent.futures.ThreadPoolExecutor(max_workers=self.download_workers) as executor:
+		with concurrent.futures.ThreadPoolExecutor(max_workers=self.download_settings.download_workers) as executor:
 			decoded_results = list(executor.map(self.decode_raw_bytes, rows_to_decode))
 
 		first_row_number = self.next_row_number

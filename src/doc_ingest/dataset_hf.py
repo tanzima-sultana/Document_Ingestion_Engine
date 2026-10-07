@@ -52,9 +52,6 @@ HUGGING_FACE_FORMAT = "hf"
 # Start of the path of a file stored in a Hugging Face dataset repository.
 HUGGING_FACE_FILE_PREFIX = "hf://datasets/"
 
-# Split read from a Hugging Face dataset.
-HUGGING_FACE_SPLIT = "train"
-
 
 def is_url(path) -> bool:
 	"""
@@ -162,10 +159,10 @@ def normalize_input_path(input_path) -> str:
 	return dataset_name
 
 
-def read_first_hugging_face_record(dataset_name) -> dict:
+def read_first_hugging_face_record(dataset_name, hugging_face_split: str) -> dict:
 	"""
-	Input: a Hugging Face dataset name (e.g. "owner/name").
-	Output: the first row of the dataset's train split as a dict.
+	Input: a Hugging Face dataset name (e.g. "owner/name") and the split to read.
+	Output: the first row of that split as a dict.
 	What it does: opens the dataset in streaming mode, so only the first row
 	is downloaded, not the whole dataset. Raises ValueError if the split
 	has no rows.
@@ -173,7 +170,7 @@ def read_first_hugging_face_record(dataset_name) -> dict:
 	# Imported here so local datasets do not pay the import cost.
 	from datasets import load_dataset
 
-	streamed_dataset = load_dataset(dataset_name, split=HUGGING_FACE_SPLIT, streaming=True)
+	streamed_dataset = load_dataset(dataset_name, split=hugging_face_split, streaming=True)
 	# Keep file columns (e.g. Pdf) as raw bytes instead of opening them
 	streamed_dataset = streamed_dataset.decode(False)
 	first_record = None
@@ -182,7 +179,7 @@ def read_first_hugging_face_record(dataset_name) -> dict:
 		break
 
 	if first_record is None:
-		raise ValueError(f"Hugging Face dataset has no rows in split '{HUGGING_FACE_SPLIT}': {dataset_name}")
+		raise ValueError(f"Hugging Face dataset has no rows in split '{hugging_face_split}': {dataset_name}")
 
 	return first_record
 
@@ -236,10 +233,10 @@ def build_url_request(url, method, extra_headers) -> urllib.request.Request:
 	return urllib.request.Request(url, headers=request_headers, method=method)
 
 
-def get_hugging_face_row_count(dataset_name) -> int:
+def get_hugging_face_row_count(dataset_name, hugging_face_split: str) -> int:
 	"""
-	Input: a Hugging Face dataset name (e.g. "owner/name").
-	Output: the number of rows in the train split, or -1 if unknown.
+	Input: a Hugging Face dataset name (e.g. "owner/name") and the split to count.
+	Output: the number of rows in that split, or -1 if unknown.
 	What it does: reads the dataset's published info (a small metadata
 	download, not the data itself). Many datasets do not publish a row
 	count; for those, and if the info cannot be loaded at all, returns -1.
@@ -257,10 +254,10 @@ def get_hugging_face_row_count(dataset_name) -> int:
 	if dataset_splits is None:
 		return -1
 
-	if HUGGING_FACE_SPLIT not in dataset_splits:
+	if hugging_face_split not in dataset_splits:
 		return -1
 
-	row_count = dataset_splits[HUGGING_FACE_SPLIT].num_examples
+	row_count = dataset_splits[hugging_face_split].num_examples
 	if row_count is None:
 		return -1
 

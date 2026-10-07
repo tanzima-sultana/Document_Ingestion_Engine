@@ -7,6 +7,7 @@ signatures with LSH) among the documents kept in a run.
 
 import datasketch
 from doc_ingest.schema import Document
+from doc_ingest.settings import DEFAULT_DEDUP_THRESHOLD
 
 NUM_PERM = 128
 _SHINGLE_SIZE = 5
@@ -18,7 +19,7 @@ class Deduplicator:
 	them.
 	"""
 
-	def __init__(self, threshold: float = 0.90):
+	def __init__(self, threshold: float = DEFAULT_DEDUP_THRESHOLD):
 		"""
 		Input: threshold - Jaccard similarity at or above which two
 			documents are near-duplicates (see make_lsh_index).

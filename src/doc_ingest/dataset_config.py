@@ -23,6 +23,7 @@ from doc_ingest.dataset_local import CONTAINER_EXTENSIONS
 from doc_ingest.dataset_local import get_local_dataset_format
 from doc_ingest.dataset_local import get_local_dataset_size
 from doc_ingest.dataset_local import read_first_local_record
+from doc_ingest.settings import DEFAULT_HUGGING_FACE_SPLIT
 
 
 # Field names checked, in order, when looking for the field that holds
@@ -52,9 +53,10 @@ class DatasetConfig:
 	size: int
 
 
-def get_dataset_config(path) -> DatasetConfig:
+def get_dataset_config(path, hugging_face_split: str = DEFAULT_HUGGING_FACE_SPLIT) -> DatasetConfig:
 	"""
-	Input: path to a dataset, either a single file or a directory of files.
+	Input: path to a dataset (a single file, a directory of files, or a Hugging Face
+	dataset name); hugging_face_split - the split read from a Hugging Face dataset.
 	Output: a DatasetConfig describing the dataset.
 	What it does: inspects the path and collects the dataset name, whether it
 	is a local path or Hugging Face dataset, the dataset format (see
@@ -66,40 +68,46 @@ def get_dataset_config(path) -> DatasetConfig:
 	found once here and passed to the helpers that need it, instead of
 	each helper working it out again.
 	"""
-	name = get_dataset_name(path)
+	name = get_dataset_name(path, hugging_face_split)
 	path_type = get_dataset_path_type(path)
 	dataset_format = get_dataset_format(path)
-	content_field = get_content_field(path, dataset_format)
-	size = get_dataset_size(path, dataset_format)
+	content_field = get_content_field(path, dataset_format, hugging_face_split)
+	size = get_dataset_size(path, dataset_format, hugging_face_split)
 
 	return DatasetConfig(name, path, path_type, dataset_format, content_field, size)
 
 
-def get_dataset_size(path, dataset_format: str) -> int:
+def get_dataset_size(path, dataset_format: str, hugging_face_split: str) -> int:
 	"""
-	Input: path to a dataset file or directory, or a Hugging Face dataset name; dataset_format - from get_dataset_format.
+	Input: path to a dataset file or directory, or a Hugging Face dataset name; dataset_format - from get_dataset_format;
+	hugging_face_split - the split counted for a Hugging Face dataset.
 	Output: the number of documents in the dataset, or -1 if it is unknown.
 	What it does: counts documents only when that is possible without reading the whole dataset:
 	the row count a Hugging Face dataset publishes (see get_hugging_face_row_count), or the local
 	count (see get_local_dataset_size).
 	"""
 	if dataset_format == HUGGING_FACE_FORMAT:
-		return get_hugging_face_row_count(path)
+		return get_hugging_face_row_count(path, hugging_face_split)
 
 	return get_local_dataset_size(path, dataset_format)
 
 
-def get_dataset_name(path) -> str:
+def get_dataset_name(path, hugging_face_split: str = DEFAULT_HUGGING_FACE_SPLIT) -> str:
 	"""
-	Input: path to a dataset file or directory, or a Hugging Face dataset name.
+	Input: path to a dataset file or directory, or a Hugging Face dataset name; hugging_face_split - the split read.
 	Output: the dataset name, e.g. "reports_1a2b3c4d".
 	What it does: last part of the path without extension, plus a short hash
 	of the full path or dataset name, so two inputs never share progress and cache.
+	A Hugging Face split other than the default is added too, so two splits never share them either.
 	"""
 	if is_hugging_face_dataset(path):
 		name_parts = path.split("/")
 		readable_name = name_parts[-1]
 		full_path = path
+		# The default split keeps the name it had before splits could be chosen
+		if hugging_face_split != DEFAULT_HUGGING_FACE_SPLIT:
+			readable_name = readable_name + "_" + hugging_face_split
+			full_path = path + "@" + hugging_face_split
 	else:
 		full_path = os.path.abspath(path)
 		base_name = os.path.basename(full_path)
@@ -142,9 +150,10 @@ def get_dataset_format(path) -> str:
 	return get_local_dataset_format(path)
 
 
-def get_content_field(path, dataset_format: str) -> str | None:
+def get_content_field(path, dataset_format: str, hugging_face_split: str) -> str | None:
 	"""
-	Input: path to a dataset file or directory, or a Hugging Face dataset name; dataset_format - from get_dataset_format.
+	Input: path to a dataset file or directory, or a Hugging Face dataset name; dataset_format - from get_dataset_format;
+	hugging_face_split - the split whose first record is read for a Hugging Face dataset.
 	Output: name of the record field holding the document content, or None.
 	What it does: only applies to container datasets (JSONL/JSON/Hugging
 	Face). Reads the first record and returns the first field from
@@ -155,7 +164,7 @@ def get_content_field(path, dataset_format: str) -> str | None:
 	if not is_container_format(dataset_format):
 		return None
 
-	first_record = read_first_container_record(path)
+	first_record = read_first_container_record(path, hugging_face_split)
 	for candidate_field in CONTENT_FIELD_CANDIDATES:
 		if candidate_field not in first_record:
 			continue
@@ -233,14 +242,14 @@ def looks_like_base64(value) -> bool:
 	return True
 
 
-def read_first_container_record(path) -> dict:
+def read_first_container_record(path, hugging_face_split: str) -> dict:
 	"""
-	Input: path to a local container dataset (JSONL/JSON), or a Hugging Face dataset name.
+	Input: path to a local container dataset (JSONL/JSON), or a Hugging Face dataset name; hugging_face_split - its split.
 	Output: the first record as a dict.
 	What it does: reads it with read_first_hugging_face_record or read_first_local_record.
 	"""
 	if is_hugging_face_dataset(path):
-		return read_first_hugging_face_record(path)
+		return read_first_hugging_face_record(path, hugging_face_split)
 
 	return read_first_local_record(path)
 

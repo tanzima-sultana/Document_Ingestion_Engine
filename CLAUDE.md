@@ -45,6 +45,7 @@ All commands below assume cuprrent working directory is the repo root (`DocInges
 		doc_ingest/
 			__init__.py          # Exposes main library entry point
 			__main__.py          # Exposes main terminal entry point
+			settings.py          # Download and process document command line optional args
 			ingest.py            # ingest_documents(size, input_path, output_path) orchastrator
 			schema.py            # Pydantic models for output JSON
 			validate.py		     # Validate given parameters and dataset config
@@ -59,9 +60,8 @@ All commands below assume cuprrent working directory is the repo root (`DocInges
 			metadata.py          # Extracts generic metadata from a document's raw bytes
 			dedup.py             # Detects exact duplicates (hash) and near-duplicates (MinHash/LSH)
 			summary.py		     # Print summary results 
-			parser.py            # Abstract parser base class plus the parser registry lookup (maps doc type -> parser)
 			error.py 			 # errors
-
+			parser.py            # Abstract parser base class plus the parser registry lookup (maps doc type -> parser)
 			parsers/
 				pdf.py          # Native text PDFs
 				scanned_pdf.py  # OCR for scanned/image PDFs

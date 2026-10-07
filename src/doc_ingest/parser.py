@@ -23,15 +23,13 @@ import time
 from doc_ingest.schema import Document
 from doc_ingest.raw_data import RawData
 from doc_ingest.error import describe_error
+from doc_ingest.settings import DEFAULT_PARSE_TIMEOUT_SECONDS
 
 logger = logging.getLogger(__name__)
 
-# Longest time one document may take to parse before it is skipped
-PARSE_TIMEOUT_SECONDS = 120
-
 
 class ParseTimeoutError(Exception):
-	"""Raised when one document takes longer than PARSE_TIMEOUT_SECONDS to parse."""
+	"""Raised when one document takes longer than its parse time limit."""
 
 class Parser(abc.ABC):
 	@abc.abstractmethod
@@ -70,17 +68,18 @@ def get_parser(doc_type: str) -> type[Parser]:
 		)
 	return parser_registry[doc_type]
 
-def parse_document(raw_data: RawData) -> tuple:
+def parse_document(raw_data: RawData, parse_timeout_seconds: int = DEFAULT_PARSE_TIMEOUT_SECONDS) -> tuple:
 	"""
 	Input: raw_data - the document to parse (doc_id, doc_type and
-		raw_path of its saved raw file).
+		raw_path of its saved raw file); parse_timeout_seconds - time limit
+		for this document.
 	Output: (doc_id, document). On failure, document is None.
 	What it does: picks the parser for raw_data.doc_type and parses the
 		raw file, in a parse worker process. Parse errors, and parsing
-		longer than PARSE_TIMEOUT_SECONDS, are not raised; the reason is
-		printed and the document is returned as None instead.
+		longer than parse_timeout_seconds, are not raised; the reason is
+		logged and the document is returned as None instead.
 	"""
-	timeout_is_set = start_parse_timeout()
+	timeout_is_set = start_parse_timeout(parse_timeout_seconds)
 	try:
 		parser_cls = get_parser(raw_data.doc_type)
 		parser = parser_cls()
@@ -95,10 +94,10 @@ def parse_document(raw_data: RawData) -> tuple:
 	return raw_data.doc_id, document
 
 
-def start_parse_timeout() -> bool:
+def start_parse_timeout(parse_timeout_seconds: int) -> bool:
 	"""
-	Input: none. Output: True if a time limit was set, else False.
-	Makes ParseTimeoutError be raised after PARSE_TIMEOUT_SECONDS. Only
+	Input: parse_timeout_seconds - the time limit. Output: True if a time limit was set, else False.
+	Makes ParseTimeoutError be raised after parse_timeout_seconds. Only
 	possible on systems with SIGALRM (not Windows) and in the main thread.
 	"""
 	if not hasattr(signal, "SIGALRM"):
@@ -106,14 +105,13 @@ def start_parse_timeout() -> bool:
 	if threading.current_thread() is not threading.main_thread():
 		return False
 
+	def raise_parse_timeout(signal_number, stack_frame):
+		"""
+		Input: the signal number and current stack frame (given by Python).
+		Output: none. Raises ParseTimeoutError to stop the parse in progress.
+		"""
+		raise ParseTimeoutError(f"parsing took longer than {parse_timeout_seconds} seconds")
+
 	signal.signal(signal.SIGALRM, raise_parse_timeout)
-	signal.alarm(PARSE_TIMEOUT_SECONDS)
+	signal.alarm(parse_timeout_seconds)
 	return True
-
-
-def raise_parse_timeout(signal_number, stack_frame):
-	"""
-	Input: the signal number and current stack frame (given by Python).
-	Output: none. Raises ParseTimeoutError to stop the parse in progress.
-	"""
-	raise ParseTimeoutError(f"parsing took longer than {PARSE_TIMEOUT_SECONDS} seconds")

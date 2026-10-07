@@ -20,11 +20,10 @@ from doc_ingest import progress
 from doc_ingest import validate
 from doc_ingest import cache
 from doc_ingest import parser
+from doc_ingest.settings import DownloadSettings
+from doc_ingest.settings import ProcessSettings
 
 logger = logging.getLogger(__name__)
-
-# Default number of documents downloaded/decoded at the same time
-DEFAULT_DOWNLOAD_WORKERS = 64
 
 
 @dataclasses.dataclass
@@ -43,16 +42,16 @@ class IngestEngine:
 	so each step can be a method instead of a function with many parameters.
 	"""
 
-	def __init__(self, size: int, input_path: str, download_workers: int, parse_workers: int | None):
+	def __init__(self, size: int, input_path: str, download_settings: DownloadSettings, process_settings: ProcessSettings):
 		"""
-		Input: the same arguments as ingest_documents.
+		Input: size, input_path, and the run's DownloadSettings and ProcessSettings.
 		Output: a new engine with empty run state. Nothing is checked, downloaded or parsed yet.
 		"""
 		self.run_start = time.perf_counter()
 		self.size = size
 		self.input_path = input_path
-		self.download_workers = download_workers
-		self.parse_workers = parse_workers
+		self.download_settings = download_settings
+		self.process_settings = process_settings
 
 
 		self.storage_path = cache.get_storage_path()
@@ -66,9 +65,9 @@ class IngestEngine:
 
 		self.summary = Summary()
 		self.summary.requested_size = size
-		self.deduplicator = Deduplicator(threshold=0.90)
 
-		# Set in run(), once the inputs pass validation
+		# Set in run(), once the inputs and settings pass validation
+		self.deduplicator = None
 		self.db_config = None
 		self.parse_executor = None
 
@@ -81,10 +80,11 @@ class IngestEngine:
 		# 0. Validate inputs before any work is done.
 		# A Hugging Face dataset page URL is turned into the dataset name first.
 		self.input_path = dataset_hf.normalize_input_path(self.input_path)
-		validate.validate_inputs(self.size, self.input_path, self.storage_path)
+		validate.validate_inputs(self.size, self.input_path, self.storage_path, self.download_settings, self.process_settings)
+		self.deduplicator = Deduplicator(threshold=self.process_settings.dedup_threshold)
 
 		# 1. Get dataset config
-		self.db_config = dataset_config.get_dataset_config(self.input_path)
+		self.db_config = dataset_config.get_dataset_config(self.input_path, self.download_settings.hugging_face_split)
 
 		# 2. Load progress
 		saved_progress = progress.load_progress(self.storage_path, self.db_config.name)
@@ -98,7 +98,7 @@ class IngestEngine:
 			return self.finish()
 
 		# 4. Fetch raw data in batches, then process each batch
-		raw_data_fetcher = RawDataFetcher(self.input_path, self.storage_path, self.db_config, self.download_workers)
+		raw_data_fetcher = RawDataFetcher(self.input_path, self.storage_path, self.db_config, self.download_settings)
 		row_iterator = raw_data_fetcher.get_iterator(self.raw_data_count)
 
 		self.create_parse_executor()
@@ -106,7 +106,7 @@ class IngestEngine:
 			while len(self.documents) < self.size and not self.source_exhausted:
 
 				# 4a. Download/decode as many rows as documents still missing,
-				# at most raw_data.MAX_BATCH_ROWS per batch
+				# at most download_settings.max_batch_rows per batch
 				self.batch_number += 1
 				rows_needed = self.size - len(self.documents)
 				logger.info("Batch %s: fetching %s row(s).", self.batch_number, rows_needed)
@@ -194,11 +194,11 @@ class IngestEngine:
 
 	def create_parse_executor(self) -> None:
 		"""
-		Input: none (uses self.parse_workers; None means one per CPU core).
+		Input: none (uses process_settings.parse_workers; None means one per CPU core).
 		Output: None. Sets self.parse_executor to a new pool of parse worker processes.
 		What it does: starts the pool with "spawn" (see README: forking with Hugging Face threads can deadlock).
 		"""
-		parse_workers = self.parse_workers
+		parse_workers = self.process_settings.parse_workers
 		if parse_workers is None:
 			parse_workers = os.cpu_count()
 			# os.cpu_count() returns None if the core count is unknown
@@ -216,7 +216,7 @@ class IngestEngine:
 		"""
 		futures = []
 		for raw_data in parse_items:
-			future = self.parse_executor.submit(parser.parse_document, raw_data)
+			future = self.parse_executor.submit(parser.parse_document, raw_data, self.process_settings.parse_timeout_seconds)
 			futures.append(future)
 
 		results = []
@@ -243,7 +243,7 @@ class IngestEngine:
 		for item_index in unfinished_indexes:
 			raw_data = parse_items[item_index]
 			try:
-				future = self.parse_executor.submit(parser.parse_document, raw_data)
+				future = self.parse_executor.submit(parser.parse_document, raw_data, self.process_settings.parse_timeout_seconds)
 				result = future.result()
 			except concurrent.futures.process.BrokenProcessPool:
 				logger.warning("Parse failed for document %s: its parse worker process died", raw_data.doc_id)
@@ -334,12 +334,18 @@ class IngestEngine:
 
 
 # --------------- CLI entry
-def ingest_documents(size: int, input_path: str, *, download_workers: int = DEFAULT_DOWNLOAD_WORKERS, parse_workers: int | None = None) -> IngestResult:
+def ingest_documents(size: int, input_path: str, *, download_settings: DownloadSettings | None = None, process_settings: ProcessSettings | None = None) -> IngestResult:
 	"""
-	Input: size - max documents to return; input_path - local file/folder or Hugging Face dataset; download_workers/parse_workers - optional parallelism.
+	Input: size - max documents to return; input_path - local file/folder or Hugging Face dataset; download_settings/process_settings - optional (None: all defaults).
 	Output: an IngestResult: .documents (up to size Documents) and .summary (the run's Summary).
 	What it does: loads cached documents first, then downloads, parses and dedups new ones in batches, saving progress after each batch so a later run can resume.
 	"""
-	ingest_engine = IngestEngine(size, input_path, download_workers, parse_workers)
+	# None, not DownloadSettings(), as the default: a default object would be shared by every call
+	if download_settings is None:
+		download_settings = DownloadSettings()
+	if process_settings is None:
+		process_settings = ProcessSettings()
+
+	ingest_engine = IngestEngine(size, input_path, download_settings, process_settings)
 	ingest_result = ingest_engine.run()
 	return ingest_result

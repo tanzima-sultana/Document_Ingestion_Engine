@@ -11,6 +11,8 @@ import unittest.mock
 import helpers
 from doc_ingest.dataset_config import get_dataset_name
 from doc_ingest.ingest import ingest_documents
+from doc_ingest.settings import DownloadSettings
+from doc_ingest.settings import ProcessSettings
 
 
 class TestIngestDocuments(unittest.TestCase):
@@ -37,7 +39,12 @@ class TestIngestDocuments(unittest.TestCase):
 		"""Runs ingest_documents quietly; returns (documents, logged output)."""
 		with self.assertLogs("doc_ingest", level="INFO") as captured_logs:
 			with unittest.mock.patch("doc_ingest.cache.get_storage_path", return_value=self.output_path):
-				ingest_result = ingest_documents(size, self.input_folder, download_workers=2, parse_workers=2)
+				ingest_result = ingest_documents(
+					size,
+					self.input_folder,
+					download_settings=DownloadSettings(download_workers=2),
+					process_settings=ProcessSettings(parse_workers=2),
+				)
 		logged_output = "\n".join(captured_logs.output)
 		return ingest_result.documents, logged_output
 
