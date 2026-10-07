@@ -41,7 +41,7 @@ class TestPathKinds(unittest.TestCase):
 		self.assertEqual(url, "https://huggingface.co/datasets/owner/name/resolve/abc123/dir/my%20file.pdf")
 
 	def test_unwrap_file_values(self):
-		"""File dicts become bytes or a URL; zip entries stay as they are."""
+		"""File dicts become bytes or their hf:// path; zip entries stay as they are."""
 		row = {
 			"embedded": {"bytes": b"%PDF-1.4", "path": "a.pdf"},
 			"linked": {"bytes": None, "path": "hf://datasets/owner/name@rev/a.pdf"},
@@ -50,7 +50,7 @@ class TestPathKinds(unittest.TestCase):
 		}
 		dataset_config.unwrap_file_values(row)
 		self.assertEqual(row["embedded"], b"%PDF-1.4")
-		self.assertEqual(row["linked"], "https://huggingface.co/datasets/owner/name/resolve/rev/a.pdf")
+		self.assertEqual(row["linked"], "hf://datasets/owner/name@rev/a.pdf")
 		self.assertIsInstance(row["zipped"], dict)
 		self.assertEqual(row["label"], 3)
 
@@ -61,16 +61,18 @@ class TestContent(unittest.TestCase):
 		"""Each kind of content value gets the right encoding."""
 		encoded_pdf = base64.b64encode(b"%PDF-1.4 some pdf body here").decode("ascii")
 		self.assertEqual(dataset_config.get_content_encoding(b"raw"), "bytes")
-		self.assertEqual(dataset_config.get_content_encoding("https://x.com/a.pdf"), "url")
+		self.assertEqual(dataset_config.get_content_encoding("hf://datasets/owner/name@rev/a.pdf"), "hf_file")
 		self.assertEqual(dataset_config.get_content_encoding(encoded_pdf), "base64")
 		self.assertEqual(dataset_config.get_content_encoding("plain words here"), "text")
 
 	def test_content_encoding_rejects_other_values(self):
-		"""A zip entry or a number cannot be used as content."""
+		"""A zip entry, a number or a web link cannot be used as content."""
 		with self.assertRaises(ValueError):
 			dataset_config.get_content_encoding({"path": "zip://a::hf://b", "bytes": None})
 		with self.assertRaises(ValueError):
 			dataset_config.get_content_encoding(42)
+		with self.assertRaises(ValueError):
+			dataset_config.get_content_encoding("https://x.com/a.pdf")
 
 	def test_document_type_from_bytes(self):
 		"""Leading bytes decide the document type."""

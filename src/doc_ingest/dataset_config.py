@@ -1,13 +1,11 @@
 import base64
 import binascii
 import dataclasses
-import email.message
 import hashlib
 import io
 import json
 import os
 import re
-import urllib.error
 import urllib.parse
 import urllib.request
 import zipfile
@@ -56,49 +54,20 @@ CONTENT_FIELD_CANDIDATES = [
 	"pdf",
 ]
 
-# URL schemes that mark a dataset path as remote rather than local.
+# URL schemes that mark a value as a web link.
 URL_SCHEMES = [
 	"http",
 	"https",
 ]
 
-# Maps a specific HTTP Content-Type to a file extension. Generic types such
-# as "text/plain" and "application/octet-stream" are left out on purpose,
-# because servers often send them for files of any kind.
-CONTENT_TYPE_TO_EXTENSION = {
-	"application/pdf": "pdf",
-	"application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
-	"application/vnd.openxmlformats-officedocument.presentationml.presentation": "pptx",
-	"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "xlsx",
-	"text/csv": "csv",
-	"text/html": "html",
-	"application/xhtml+xml": "html",
-	"text/markdown": "md",
-	"text/x-markdown": "md",
-	"application/jsonl": "jsonl",
-	"application/x-jsonlines": "jsonl",
-	"application/x-ndjson": "jsonl",
-	"application/json": "json",
-}
-
 # Shortest string that is considered when guessing whether a value is base64.
 MINIMUM_BASE64_LENGTH = 16
 
-# Number of bytes read from the start of a URL when sniffing its file type.
-# Large enough to reach the folder names inside an Office (zip) file.
-URL_LEADING_BYTE_COUNT = 65536
-
-# Seconds to wait for a URL to respond before giving up.
+# Seconds to wait for a document link to respond before giving up.
 URL_TIMEOUT_SECONDS = 30
 
-# User-Agent sent with URL requests. Some servers reject Python's default one.
+# User-Agent sent when downloading a document link. Some servers reject Python's default one.
 URL_USER_AGENT = "DocIngestEngine/1.0"
-
-# Per-process caches so one URL is not fetched again by every helper that
-# get_dataset_config calls. Keyed by URL.
-URL_HEADERS_CACHE = {}
-URL_LEADING_BYTES_CACHE = {}
-URL_FIRST_RECORD_CACHE = {}
 
 # Shape of a Hugging Face dataset name: "owner/name", made of letters,
 # digits, ".", "_" and "-". Bare names without an owner are not accepted,
@@ -125,6 +94,9 @@ HUGGING_FACE_FORMAT = "hf"
 # files can be of different types; each file's type comes from its own
 # extension.
 FOLDER_FORMAT = "folder"
+
+# Start of the path of a file stored in a Hugging Face dataset repository.
+HUGGING_FACE_FILE_PREFIX = "hf://datasets/"
 
 # Split read from a Hugging Face dataset.
 HUGGING_FACE_SPLIT = "train"
@@ -153,7 +125,7 @@ def get_dataset_config(path) -> DatasetConfig:
 	Input: path to a dataset, either a single file or a directory of files.
 	Output: a DatasetConfig describing the dataset.
 	What it does: inspects the path and collects the dataset name, whether it
-	is a URL, local path or Hugging Face dataset, the dataset format (see
+	is a local path or Hugging Face dataset, the dataset format (see
 	get_dataset_format), (for container datasets such as JSONL) which field
 	holds the content, and the number of documents in the dataset. The
 	document type and the content encoding are not part of the config,
@@ -171,8 +143,7 @@ def get_dataset_config(path) -> DatasetConfig:
 
 def get_dataset_size(path) -> int:
 	"""
-	Input: path to a dataset file or directory, a URL, or a Hugging Face
-	dataset name.
+	Input: path to a dataset file or directory, or a Hugging Face dataset name.
 	Output: the number of documents in the dataset, or -1 if it is unknown.
 	What it does: counts documents only when that is possible without reading
 	the whole dataset:
@@ -180,7 +151,7 @@ def get_dataset_size(path) -> int:
 	  or -1 if the dataset does not publish one.
 	- Container datasets (JSONL/JSON): -1, because counting records means
 	  reading every line or the whole file.
-	- A single local file or a URL: 1, since it is one document.
+	- A single local file: 1, since it is one document.
 	- A local directory: the number of files with a supported document
 	  extension (other files are ignored by ingestion anyway).
 	"""
@@ -189,9 +160,6 @@ def get_dataset_size(path) -> int:
 
 	if is_container_dataset(path):
 		return -1
-
-	if is_url(path):
-		return 1
 
 	if os.path.isfile(path):
 		return 1
@@ -206,16 +174,12 @@ def get_dataset_size(path) -> int:
 
 def get_dataset_name(path) -> str:
 	"""
-	Input: path to a dataset file or directory, a URL, or a Hugging Face
-	dataset name.
+	Input: path to a dataset file or directory, or a Hugging Face dataset name.
 	Output: the dataset name, e.g. "reports_1a2b3c4d".
 	What it does: last part of the path without extension, plus a short hash
-	of the full path or URL, so two inputs never share progress and cache.
+	of the full path or dataset name, so two inputs never share progress and cache.
 	"""
-	if is_url(path):
-		readable_name = get_url_dataset_name(path)
-		full_path = path
-	elif is_hugging_face_dataset(path):
+	if is_hugging_face_dataset(path):
 		name_parts = path.split("/")
 		readable_name = name_parts[-1]
 		full_path = path
@@ -233,17 +197,13 @@ def get_dataset_name(path) -> str:
 
 def get_dataset_path_type(path) -> str:
 	"""
-	Input: path to a dataset: a URL, a local file/directory, or a Hugging
-	Face dataset name.
-	Output: "url", "local" or "hf".
-	What it does: returns "url" if the path starts with an http or https
-	scheme, "local" if the path exists on disk, and "hf" if it looks like a
-	Hugging Face dataset name (e.g. "owner/name"). Raises FileNotFoundError
-	if it is none of these.
+	Input: path to a dataset: a local file/directory, or a Hugging Face
+	dataset name.
+	Output: "local" or "hf".
+	What it does: returns "local" if the path exists on disk, and "hf" if it
+	looks like a Hugging Face dataset name (e.g. "owner/name"). Raises
+	FileNotFoundError if it is neither.
 	"""
-	if is_url(path):
-		return "url"
-
 	if os.path.exists(path):
 		return "local"
 
@@ -255,8 +215,7 @@ def get_dataset_path_type(path) -> str:
 
 def get_dataset_format(path) -> str:
 	"""
-	Input: path to a dataset file or directory, a URL, or a Hugging Face
-	dataset name.
+	Input: path to a dataset file or directory, or a Hugging Face dataset name.
 	Output: the dataset format (see find_dataset_format).
 	What it does: returns the format from DATASET_FORMAT_CACHE if it was
 	already found for this path; otherwise finds it with
@@ -272,24 +231,19 @@ def get_dataset_format(path) -> str:
 
 def find_dataset_format(path) -> str:
 	"""
-	Input: path to a dataset file or directory, a URL, or a Hugging Face
-	dataset name.
+	Input: path to a dataset file or directory, or a Hugging Face dataset name.
 	Output: the dataset format, which decides how the dataset is read:
 		HUGGING_FACE_FORMAT ("hf") - a Hugging Face dataset
 		"jsonl" or "json"          - container files holding records
 		FOLDER_FORMAT ("folder")   - a local folder of document files
-		any other extension        - a single document file or URL
-		                             (e.g. "pdf", "docx")
-	What it does: for a single file, returns its extension. For a URL, see
-	get_url_document_extension. For a directory, if it holds container files
+		any other extension        - a single document file (e.g. "pdf", "docx")
+	What it does: for a single file, returns its extension. For a directory,
+	if it holds container files
 	(JSONL/JSON), returns the most common container extension; otherwise
 	returns FOLDER_FORMAT, because the folder can hold documents of
 	different types. Raises ValueError if a file has no extension, or a
 	directory has no container files and no supported document files.
 	"""
-	if is_url(path):
-		return get_url_document_extension(path)
-
 	if is_hugging_face_dataset(path):
 		return HUGGING_FACE_FORMAT
 
@@ -327,8 +281,7 @@ def find_dataset_format(path) -> str:
 
 def get_content_field(path) -> str | None:
 	"""
-	Input: path to a dataset file or directory, a URL, or a Hugging Face
-	dataset name.
+	Input: path to a dataset file or directory, or a Hugging Face dataset name.
 	Output: name of the record field holding the document content, or None.
 	What it does: only applies to container datasets (JSONL/JSON/Hugging
 	Face). Reads the first record and returns the first field from
@@ -359,14 +312,15 @@ def get_content_encoding(content_value) -> str:
 	"""
 	Input: the value of the content field of one container record.
 	Output: one of:
-		"bytes"  - the value already holds raw bytes (Hugging Face binary column)
-		"url"    - the value is a link to download the document from
-		"base64" - the value holds base64-encoded bytes
-		"text"   - the value is the document as plain text
+		"bytes"   - the value already holds raw bytes (Hugging Face binary column)
+		"hf_file" - the value is an "hf://datasets/..." path of a Hugging Face
+		            file to download (see unwrap_file_values)
+		"base64"  - the value holds base64-encoded bytes
+		"text"    - the value is the document as plain text
 	What it does: checks which of the above the value is, in that order.
 	It is called for every record, because records of one dataset can be
 	encoded differently. Raises ValueError if the value is neither a string
-	nor bytes.
+	nor bytes, or is a web link: only Hugging Face file links are downloaded.
 	"""
 	if isinstance(content_value, bytes):
 		return "bytes"
@@ -378,8 +332,11 @@ def get_content_encoding(content_value) -> str:
 	if not isinstance(content_value, str):
 		raise ValueError(f"Content value is not a string or bytes: {type(content_value).__name__}")
 
+	if content_value.startswith(HUGGING_FACE_FILE_PREFIX):
+		return "hf_file"
+
 	if is_url(content_value):
-		return "url"
+		raise ValueError(f"web links in records are not supported, only Hugging Face files: {content_value}")
 
 	if looks_like_base64(content_value):
 		return "base64"
@@ -416,18 +373,16 @@ def get_document_type_from_bytes(content_bytes) -> str:
 
 def get_office_document_type_from_zip(content_bytes) -> str | None:
 	"""
-	Input: raw bytes of a zip file, either whole or only its first part.
+	Input: raw bytes of a zip file.
 	Output: "docx", "pptx", "xlsx", or None if it is not an Office document.
 	What it does: opens the bytes as a zip archive and checks for the folder
-	each Office format uses ("word/", "ppt/", "xl/"). If the bytes are only
-	the start of a zip (as when sniffing a URL), the archive cannot be opened,
-	so the folder names are searched for directly in the raw bytes instead;
-	zip files store each member's name uncompressed before its data.
+	each Office format uses ("word/", "ppt/", "xl/"). Returns None if the
+	bytes cannot be opened as a zip.
 	"""
 	try:
 		zip_archive = zipfile.ZipFile(io.BytesIO(content_bytes))
 	except zipfile.BadZipFile:
-		return get_office_document_type_from_partial_zip(content_bytes)
+		return None
 
 	with zip_archive:
 		for member_name in zip_archive.namelist():
@@ -437,26 +392,6 @@ def get_office_document_type_from_zip(content_bytes) -> str | None:
 				return "pptx"
 			if member_name.startswith("xl/"):
 				return "xlsx"
-
-	return None
-
-
-def get_office_document_type_from_partial_zip(content_bytes) -> str | None:
-	"""
-	Input: the first part of a zip file's bytes.
-	Output: "docx", "pptx", "xlsx", or None if no Office folder name is found.
-	What it does: searches the raw bytes for the folder names each Office
-	format uses ("word/", "ppt/", "xl/") and returns the type of the first
-	one that appears.
-	"""
-	if b"word/" in content_bytes:
-		return "docx"
-
-	if b"ppt/" in content_bytes:
-		return "pptx"
-
-	if b"xl/" in content_bytes:
-		return "xlsx"
 
 	return None
 
@@ -490,18 +425,14 @@ def looks_like_base64(value) -> bool:
 def read_first_container_record(path) -> dict:
 	"""
 	Input: path to a container dataset (JSONL/JSON file or directory of them),
-	or a URL to one container file.
+	or a Hugging Face dataset name.
 	Output: the first record as a dict.
 	What it does: finds the first container file, then reads its first
 	record. For JSONL, that is the first non-empty line. For JSON, the file
 	must hold either one object or a list of objects; the first object is
-	returned. URLs are handled by read_first_url_container_record and
-	Hugging Face datasets by read_first_hugging_face_record. Raises
-	ValueError if no record can be found.
+	returned. Hugging Face datasets are handled by
+	read_first_hugging_face_record. Raises ValueError if no record can be found.
 	"""
-	if is_url(path):
-		return read_first_url_container_record(path)
-
 	if is_hugging_face_dataset(path):
 		return read_first_hugging_face_record(path)
 
@@ -528,8 +459,8 @@ def read_first_container_record(path) -> dict:
 
 def get_first_record_from_loaded_json(loaded_json, source) -> dict:
 	"""
-	Input: the parsed contents of a JSON file, and the file path or URL it
-	came from (used only in error messages).
+	Input: the parsed contents of a JSON file, and the file path it came
+	from (used only in error messages).
 	Output: the first record as a dict.
 	What it does: if the JSON is one object, returns it. If it is a list,
 	returns its first item, which must be an object. Raises ValueError
@@ -621,193 +552,6 @@ def is_url(path) -> bool:
 	return True
 
 
-def get_url_dataset_name(url) -> str:
-	"""
-	Input: a dataset URL.
-	Output: the dataset name as a string.
-	What it does: uses the file name the server gives (Content-Disposition
-	header) or, failing that, the last part of the URL path, with the
-	extension removed. If neither exists (e.g. "https://example.com/"), uses
-	the host name.
-	"""
-	file_name = get_url_file_name(url)
-	if file_name != "":
-		name_without_extension, _extension = os.path.splitext(file_name)
-		return name_without_extension
-
-	parsed_url = urllib.parse.urlparse(url)
-	return parsed_url.netloc
-
-
-def get_url_file_name(url) -> str:
-	"""
-	Input: a dataset URL.
-	Output: the file name of the URL, or "" if there is none.
-	What it does: prefers the file name from the server's Content-Disposition
-	header, because it is the real name of the file. Otherwise takes the last
-	part of the URL path (e.g. "https://x.com/data/report.pdf?v=2" ->
-	"report.pdf").
-	"""
-	headers = fetch_url_headers(url)
-	disposition_file_name = get_file_name_from_content_disposition(headers)
-	if disposition_file_name is not None:
-		return disposition_file_name
-
-	parsed_url = urllib.parse.urlparse(url)
-	unquoted_url_path = urllib.parse.unquote(parsed_url.path)
-	return os.path.basename(unquoted_url_path)
-
-
-def get_url_document_extension(url) -> str:
-	"""
-	Input: a dataset URL.
-	Output: lowercase file extension without the dot (e.g. "pdf", "jsonl").
-	What it does: tries the cheapest reliable signal first and only reads
-	file content as a last resort:
-	1. The file name in the Content-Disposition header.
-	2. A specific Content-Type header (e.g. "application/pdf").
-	3. The extension in the URL path.
-	4. A generic "text/plain" Content-Type, which means plain text.
-	5. The first bytes of the file (see get_extension_from_leading_bytes).
-	The URL path is checked before "text/plain" because servers such as raw
-	GitHub send "text/plain" for Markdown and JSONL files too.
-	"""
-	headers = fetch_url_headers(url)
-
-	disposition_file_name = get_file_name_from_content_disposition(headers)
-	if disposition_file_name is not None:
-		disposition_extension = get_extension_of_file(disposition_file_name)
-		if disposition_extension != "":
-			return disposition_extension
-
-	content_type = get_content_type_from_headers(headers)
-	if content_type in CONTENT_TYPE_TO_EXTENSION:
-		return CONTENT_TYPE_TO_EXTENSION[content_type]
-
-	parsed_url = urllib.parse.urlparse(url)
-	unquoted_url_path = urllib.parse.unquote(parsed_url.path)
-	url_path_extension = get_extension_of_file(unquoted_url_path)
-	if url_path_extension != "":
-		return url_path_extension
-
-	if content_type == "text/plain":
-		return "txt"
-
-	leading_bytes = fetch_url_leading_bytes(url)
-	return get_extension_from_leading_bytes(leading_bytes)
-
-
-def get_extension_from_leading_bytes(leading_bytes) -> str:
-	"""
-	Input: the first bytes of a file.
-	Output: a guessed lowercase file extension without the dot.
-	What it does: if the text starts with "[", or the first line is just "{"
-	(a pretty-printed object), returns "json". If it starts with "{" on a
-	longer first line, returns "jsonl" (one record per line). Otherwise
-	guesses the document type from the bytes; for those types the extension
-	has the same name (e.g. "pdf", "docx", "html", "txt").
-	"""
-	leading_text = leading_bytes.decode("utf-8", errors="ignore").lstrip()
-
-	if leading_text.startswith("["):
-		return "json"
-
-	if leading_text.startswith("{"):
-		first_line = leading_text.split("\n", 1)[0].strip()
-		if first_line == "{":
-			return "json"
-		return "jsonl"
-
-	return get_document_type_from_bytes(leading_bytes)
-
-
-def read_first_url_container_record(url) -> dict:
-	"""
-	Input: a URL to one container file (JSONL/JSON).
-	Output: the first record as a dict.
-	What it does: for JSONL, streams the file line by line and stops at the
-	first non-empty line, so the rest of the file is never downloaded. For
-	JSON, the whole file is downloaded, because a JSON list cannot be parsed
-	from only part of the file. The result is cached per URL.
-	"""
-	if url in URL_FIRST_RECORD_CACHE:
-		return URL_FIRST_RECORD_CACHE[url]
-
-	extension = get_url_document_extension(url)
-	request = build_url_request(url, "GET", {})
-
-	if extension == "jsonl":
-		first_record = None
-		with urllib.request.urlopen(request, timeout=URL_TIMEOUT_SECONDS) as response:
-			for raw_line in response:
-				stripped_line = raw_line.decode("utf-8").strip()
-				if stripped_line == "":
-					continue
-				first_record = json.loads(stripped_line)
-				break
-		if first_record is None:
-			raise ValueError(f"JSONL file has no records: {url}")
-		if not isinstance(first_record, dict):
-			raise ValueError(f"First JSONL record is not an object in: {url}")
-		URL_FIRST_RECORD_CACHE[url] = first_record
-		return first_record
-
-	with urllib.request.urlopen(request, timeout=URL_TIMEOUT_SECONDS) as response:
-		response_body = response.read()
-
-	loaded_json = json.loads(response_body.decode("utf-8"))
-	first_record = get_first_record_from_loaded_json(loaded_json, url)
-	URL_FIRST_RECORD_CACHE[url] = first_record
-	return first_record
-
-
-def fetch_url_headers(url) -> dict:
-	"""
-	Input: a URL.
-	Output: the response headers as a dict with lowercase header names, or
-	an empty dict if the request failed.
-	What it does: sends a HEAD request, which returns only headers and no
-	file content. Some servers reject HEAD requests; a failure is not an
-	error here, because the caller falls back to other checks. The result is
-	cached per URL.
-	"""
-	if url in URL_HEADERS_CACHE:
-		return URL_HEADERS_CACHE[url]
-
-	headers = {}
-	request = build_url_request(url, "HEAD", {})
-	try:
-		with urllib.request.urlopen(request, timeout=URL_TIMEOUT_SECONDS) as response:
-			for header_name, header_value in response.headers.items():
-				headers[header_name.lower()] = header_value
-	except urllib.error.URLError:
-		headers = {}
-
-	URL_HEADERS_CACHE[url] = headers
-	return headers
-
-
-def fetch_url_leading_bytes(url) -> bytes:
-	"""
-	Input: a URL.
-	Output: up to URL_LEADING_BYTE_COUNT bytes from the start of the file.
-	What it does: sends a GET request with a Range header asking for only the
-	first bytes. If the server ignores the Range header and sends the whole
-	file, only the first bytes are read and the connection is closed. The
-	result is cached per URL.
-	"""
-	if url in URL_LEADING_BYTES_CACHE:
-		return URL_LEADING_BYTES_CACHE[url]
-
-	range_header_value = f"bytes=0-{URL_LEADING_BYTE_COUNT - 1}"
-	request = build_url_request(url, "GET", {"Range": range_header_value})
-	with urllib.request.urlopen(request, timeout=URL_TIMEOUT_SECONDS) as response:
-		leading_bytes = response.read(URL_LEADING_BYTE_COUNT)
-
-	URL_LEADING_BYTES_CACHE[url] = leading_bytes
-	return leading_bytes
-
-
 def build_url_request(url, method, extra_headers) -> urllib.request.Request:
 	"""
 	Input: a URL, an HTTP method ("GET" or "HEAD"), and a dict of extra
@@ -822,53 +566,14 @@ def build_url_request(url, method, extra_headers) -> urllib.request.Request:
 	return urllib.request.Request(url, headers=request_headers, method=method)
 
 
-def get_content_type_from_headers(headers) -> str:
-	"""
-	Input: response headers as a dict with lowercase header names.
-	Output: the lowercase Content-Type without parameters (e.g.
-	"text/html; charset=utf-8" -> "text/html"), or "" if there is none.
-	What it does: reads and normalizes the Content-Type header.
-	"""
-	if "content-type" not in headers:
-		return ""
-
-	content_type_value = headers["content-type"]
-	media_type = content_type_value.split(";", 1)[0]
-	return media_type.strip().lower()
-
-
-def get_file_name_from_content_disposition(headers) -> str | None:
-	"""
-	Input: response headers as a dict with lowercase header names.
-	Output: the file name from the Content-Disposition header, or None.
-	What it does: parses a header such as
-	'attachment; filename="report.pdf"' and returns "report.pdf". Uses the
-	standard library's email parser, which handles quoting and encoded names.
-	"""
-	if "content-disposition" not in headers:
-		return None
-
-	header_message = email.message.Message()
-	header_message["content-disposition"] = headers["content-disposition"]
-	file_name = header_message.get_filename()
-	if file_name is None:
-		return None
-
-	return os.path.basename(file_name)
-
-
 def is_hugging_face_dataset(path) -> bool:
 	"""
 	Input: a dataset path string.
 	Output: True if the path is a Hugging Face dataset name, otherwise False.
-	What it does: a path is treated as a Hugging Face dataset name when it is
-	not a URL, does not exist on disk, and has the shape "owner/name".
-	Whether the dataset really exists on the Hub is only found out when it
-	is opened.
+	What it does: a path is treated as a Hugging Face dataset name when it
+	does not exist on disk and has the shape "owner/name". Whether the
+	dataset really exists on the Hub is only found out when it is opened.
 	"""
-	if is_url(path):
-		return False
-
 	if os.path.exists(path):
 		return False
 
@@ -974,7 +679,7 @@ def read_first_hugging_face_record(dataset_name) -> dict:
 	if dataset_name in HUGGING_FACE_FIRST_RECORD_CACHE:
 		return HUGGING_FACE_FIRST_RECORD_CACHE[dataset_name]
 
-	# Imported here so local and URL datasets do not pay the import cost.
+	# Imported here so local datasets do not pay the import cost.
 	from datasets import load_dataset
 
 	streamed_dataset = load_dataset(dataset_name, split=HUGGING_FACE_SPLIT, streaming=True)
@@ -996,7 +701,7 @@ def unwrap_file_values(row) -> dict:
 	"""
 	Input: one Hugging Face row. Output: the same row.
 	A file column read without decoding is {"bytes": ..., "path": ...}; it
-	is replaced by its bytes, or by a download URL when only an hf:// path is given.
+	is replaced by its bytes, or by its hf:// path when only that is given.
 	"""
 	for field_name, field_value in row.items():
 		if not isinstance(field_value, dict):
@@ -1006,8 +711,8 @@ def unwrap_file_values(row) -> dict:
 		file_path = field_value.get("path")
 		if isinstance(file_bytes, bytes):
 			row[field_name] = file_bytes
-		elif isinstance(file_path, str) and file_path.startswith("hf://datasets/"):
-			row[field_name] = get_hugging_face_file_url(file_path)
+		elif isinstance(file_path, str) and file_path.startswith(HUGGING_FACE_FILE_PREFIX):
+			row[field_name] = file_path
 
 	return row
 
@@ -1017,7 +722,7 @@ def get_hugging_face_file_url(hf_path) -> str:
 	Input: "hf://datasets/<owner>/<name>@<revision>/<file path>".
 	Output: its download URL on HUGGING_FACE_HOST.
 	"""
-	repo_and_file = hf_path[len("hf://datasets/"):]
+	repo_and_file = hf_path[len(HUGGING_FACE_FILE_PREFIX):]
 	path_parts = repo_and_file.split("/", 2)
 	owner = path_parts[0]
 	name_and_revision = path_parts[1]
@@ -1035,7 +740,7 @@ def get_hugging_face_row_count(dataset_name) -> int:
 	download, not the data itself). Many datasets do not publish a row
 	count; for those, and if the info cannot be loaded at all, returns -1.
 	"""
-	# Imported here so local and URL datasets do not pay the import cost.
+	# Imported here so local datasets do not pay the import cost.
 	from datasets import load_dataset_builder
 
 	try:

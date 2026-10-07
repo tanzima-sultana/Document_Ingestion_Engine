@@ -26,8 +26,8 @@ def ingest_documents(size: int, input_path: str, *, download_workers: int = DEFA
 	"""
 	Input:
 		size - maximum number of documents to return.
-		input_path - the --input_path value: a local file or folder, a web
-		URL, or a Hugging Face dataset name.
+		input_path - the --input_path value: a local file or folder, a
+		Hugging Face dataset name, or its Hugging Face page URL.
 		download_workers - optional; documents downloaded/decoded at the
 		same time (default DEFAULT_DOWNLOAD_WORKERS).
 		parse_workers - optional; documents parsed at the same time, one
@@ -35,7 +35,8 @@ def ingest_documents(size: int, input_path: str, *, download_workers: int = DEFA
 	Output:
 		A list of the collected Documents.
 	What it does:
-		First checks size, input_path and the storage folder with
+		First turns a Hugging Face dataset page URL into the dataset name
+		(dataset_config.normalize_input_path). Then checks size, input_path and the storage folder with
 		validate.validate_inputs, which raises TypeError or ValueError if
 		a check fails. Raw files, processed documents and progress are
 		stored under cache.get_storage_path().
@@ -55,7 +56,9 @@ def ingest_documents(size: int, input_path: str, *, download_workers: int = DEFA
 	documents = {}
 	storage_path = cache.get_storage_path()
 
-	# 0. Validate inputs before any work is done
+	# 0. Validate inputs before any work is done.
+	# A Hugging Face dataset page URL is turned into the dataset name first.
+	input_path = dataset_config.normalize_input_path(input_path)
 	validate.validate_inputs(size, input_path, storage_path)
 
 	summary = Summary()

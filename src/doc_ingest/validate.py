@@ -1,10 +1,6 @@
 import os
 import tempfile
-import urllib.error
-import urllib.request
 
-from doc_ingest.dataset_config import URL_TIMEOUT_SECONDS
-from doc_ingest.dataset_config import build_url_request
 from doc_ingest.dataset_config import has_hugging_face_name_shape
 from doc_ingest.dataset_config import is_url
 
@@ -34,23 +30,20 @@ def validate_inputs(size: int, input_path: str, storage_path: str):
 	# 4. input_path must not match more than one kind of input
 	validate_input_path_is_not_ambiguous(input_path)
 
-	# 5. local input_path must exist on this machine
+	# 5. input_path must be a local path that exists or a Hugging Face dataset name
 	validate_local_input_path_exists(input_path)
 
-	# 6. url input_path must be reachable
-	validate_url_input_path_exists(input_path)
-
-	# 7. storage_path must not be empty or only spaces
+	# 6. storage_path must not be empty or only spaces
 	validate_storage_path_is_not_empty(storage_path)
 
-	# 8. if storage_path already exists, it must be a folder, not a file
+	# 7. if storage_path already exists, it must be a folder, not a file
 	validate_storage_path_is_not_a_file(storage_path)
 
-	# 9. storage_path must not be the input folder or inside it
-	# (runs before 10, so a bad storage folder is never created)
+	# 8. storage_path must not be the input folder or inside it
+	# (runs before 9, so a bad storage folder is never created)
 	validate_storage_path_is_outside_input_folder(input_path, storage_path)
 
-	# 10. storage_path must be creatable and writable
+	# 9. storage_path must be creatable and writable
 	validate_storage_path_is_writable(storage_path)
 
 
@@ -112,41 +105,19 @@ def validate_input_path_is_not_ambiguous(input_path):
 		input_path - the --input_path value, which must already be
 		non-empty text.
 	Output:
-		None. Raises ValueError if the kind cannot be decided.
+		None. Never raises.
 	What it does:
-		Works out which kinds of input the path matches: an existing local
-		file or folder, a web URL, or a Hugging Face dataset name.
-		If it matches more than one kind and one of them is local, the
-		local path wins and a note is printed saying so.
-		If it matches more than one kind and none is local, there is no
-		safe choice, so it raises an error.
-		Paths that match no kind are left for the later input checks.
+		If input_path is an existing local file or folder and also has the
+		shape of a Hugging Face dataset name ("owner/name"), the local path
+		wins and a note is printed saying so.
 	"""
-	matched_kinds = []
-
-	if is_local_path(input_path):
-		matched_kinds.append("local")
-
-	if is_url(input_path):
-		matched_kinds.append("url")
-
-	if has_hugging_face_name_shape(input_path):
-		matched_kinds.append("huggingface_dataset")
-
-	if len(matched_kinds) <= 1:
+	if not is_local_path(input_path):
 		return
 
-	if "local" in matched_kinds:
-		print(
-			"Note: input_path " + repr(input_path) + " matches "
-			+ ", ".join(matched_kinds) + ". Using the local path."
-		)
+	if not has_hugging_face_name_shape(input_path):
 		return
 
-	raise ValueError(
-		"input_path " + repr(input_path) + " is ambiguous, it matches "
-		+ ", ".join(matched_kinds)
-	)
+	print("Note: input_path " + repr(input_path) + " matches a local path and a Hugging Face dataset name. Using the local path.")
 
 
 def validate_local_input_path_exists(input_path):
@@ -156,71 +127,18 @@ def validate_local_input_path_exists(input_path):
 	Output:
 		None. Raises ValueError if the check fails.
 	What it does:
-		If input_path is meant to be a local file or folder (it is not a
-		URL and not a Hugging Face dataset name), checks that it exists on
-		this machine. URLs and dataset names are skipped.
+		Web URLs are not supported, so a URL fails. A Hugging Face dataset
+		name ("owner/name") passes. Anything else must be a local file or
+		folder that exists on this machine.
 	"""
 	if is_url(input_path):
-		return
+		raise ValueError("input_path must be a local path or a Hugging Face dataset name, web URLs are not supported: " + repr(input_path))
 
 	if has_hugging_face_name_shape(input_path):
 		return
 
 	if not is_local_path(input_path):
 		raise ValueError("input_path does not exist on this machine: " + repr(input_path))
-
-
-def validate_url_input_path_exists(input_path):
-	"""
-	Input:
-		input_path - the --input_path value.
-	Output:
-		None. Raises ValueError if the check fails.
-	What it does:
-		If input_path is a URL, asks the web server whether the page or
-		file exists. It first sends a HEAD request (headers only, no
-		download). Some servers refuse HEAD, so on a 403 or 405 answer it
-		tries a normal GET request and closes it without reading the body.
-		Raises an error if the server answers with an error code (for
-		example 404), cannot be reached, or does not answer within
-		URL_TIMEOUT_SECONDS. Inputs that are not URLs are skipped.
-	"""
-	if not is_url(input_path):
-		return
-
-	try:
-		request_url_and_close(input_path, "HEAD")
-	except urllib.error.HTTPError as head_error:
-		head_was_refused = head_error.code in (403, 405)
-		if not head_was_refused:
-			raise ValueError("input_path URL returned HTTP " + str(head_error.code) + ": " + input_path)
-
-		try:
-			request_url_and_close(input_path, "GET")
-		except urllib.error.HTTPError as get_error:
-			raise ValueError("input_path URL returned HTTP " + str(get_error.code) + ": " + input_path)
-		except (urllib.error.URLError, OSError) as get_connection_error:
-			raise ValueError("input_path URL could not be reached: " + input_path + " (" + str(get_connection_error) + ")")
-	except (urllib.error.URLError, OSError) as head_connection_error:
-		raise ValueError("input_path URL could not be reached: " + input_path + " (" + str(head_connection_error) + ")")
-
-
-def request_url_and_close(url, request_method):
-	"""
-	Input:
-		url - the web address to request.
-		request_method - "HEAD" or "GET".
-	Output:
-		None. Raises urllib.error.HTTPError for error answers (400 and
-		above), and urllib.error.URLError or OSError when the server
-		cannot be reached or times out.
-	What it does:
-		Sends one request to url, follows redirects, and closes the
-		connection straight away without downloading the body.
-	"""
-	url_request = build_url_request(url, request_method, {})
-	with urllib.request.urlopen(url_request, timeout=URL_TIMEOUT_SECONDS):
-		pass
 
 
 def validate_storage_path_is_not_empty(storage_path):
@@ -275,7 +193,7 @@ def validate_storage_path_is_outside_input_folder(input_path, storage_path):
 		would read its own stored files as input documents.
 		Both paths are turned into full real paths first (symbolic links
 		resolved), so "./data" and "data/" count as the same folder.
-		Skipped when input_path is not a local folder (a file, URL or
+		Skipped when input_path is not a local folder (a file or a
 		dataset name).
 	"""
 	input_path_is_folder = os.path.isdir(input_path)

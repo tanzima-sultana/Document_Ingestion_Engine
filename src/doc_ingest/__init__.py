@@ -8,7 +8,6 @@ import os
 import sys
 
 from doc_ingest import cache
-from doc_ingest.dataset_config import normalize_input_path
 from doc_ingest.ingest import DEFAULT_DOWNLOAD_WORKERS
 from doc_ingest.ingest import ingest_documents
 
@@ -37,7 +36,7 @@ def parse_args(argument_list):
 		"--input_path",
 		type=str,
 		required=True,
-		help="Local path, URL, or dataset name to read documents from.",
+		help="Local path, or Hugging Face dataset name (or its page URL), to read documents from.",
 	)
 	argument_parser.add_argument(
 		"--download_workers",
@@ -59,8 +58,7 @@ if __name__ == "__main__":
 
 	args = parse_args(sys.argv[1:])
 	size = args.size
-	# A Hugging Face dataset page URL is turned into the dataset name
-	input_path = normalize_input_path(args.input_path)
+	input_path = args.input_path
 	storage_path = cache.get_storage_path()
 	download_workers = args.download_workers
 	parse_workers = args.parse_workers
