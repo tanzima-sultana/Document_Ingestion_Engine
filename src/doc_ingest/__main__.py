@@ -100,7 +100,9 @@ def main():
 	"""
 	# The library only logs; the CLI decides how logs are shown.
 	# stdout, so they stay in order with the prints below.
-	logging.basicConfig(level=logging.INFO, format="%(message)s", stream=sys.stdout)
+	# Other libraries (e.g. httpx, used by Hugging Face) show warnings only; doc_ingest shows its progress too.
+	logging.basicConfig(level=logging.WARNING, format="%(message)s", stream=sys.stdout)
+	logging.getLogger("doc_ingest").setLevel(logging.INFO)
 
 	args = parse_args(sys.argv[1:])
 	size = args.size
