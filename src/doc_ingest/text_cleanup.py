@@ -33,8 +33,9 @@ def extract_clean_text(reader: pypdf.PdfReader) -> str:
 		try:
 			page_text = page.extract_text()
 		except Exception as error:
-			print(f"Could not extract page text: {type(error).__name__}: {error}")
+			print(f"Could not extract page text: {describe_error(error)}")
 			page_text = ""
+		page_text = fix_broken_characters(page_text)
 
 		page_lines = []
 		for line in page_text.splitlines():
@@ -63,6 +64,26 @@ def extract_clean_text(reader: pypdf.PdfReader) -> str:
 			page_texts.append(page_text)
 
 	return "\n\n".join(page_texts)
+
+
+def fix_broken_characters(text: str) -> str:
+	"""
+	Input: text. Output: the same text, safe to save as UTF-8.
+	pypdf can return a character split into two halves (a UTF-16 surrogate
+	pair, e.g. math letters); pairs are joined back, lone halves become "\ufffd".
+	"""
+	text_bytes = text.encode("utf-16-le", "surrogatepass")
+	fixed_text = text_bytes.decode("utf-16-le", "replace")
+	return fixed_text
+
+
+def describe_error(error: Exception) -> str:
+	"""
+	Input: an error. Output: "<ErrorType>: <message>" as printable text.
+	Broken characters in the message are fixed, so printing it cannot fail.
+	"""
+	error_text = f"{type(error).__name__}: {error}"
+	return fix_broken_characters(error_text)
 
 
 def find_header_footer_keys(pages_lines: list[list[str]]) -> set[str]:

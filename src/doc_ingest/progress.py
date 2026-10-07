@@ -2,6 +2,8 @@ import dataclasses
 import json
 import os
 
+from doc_ingest.validate import IngestError
+
 
 @dataclasses.dataclass
 class Progress:
@@ -58,7 +60,7 @@ def load_progress(storage_path: str, dataset_name: str) -> Progress:
 		The saved Progress for this dataset, or an empty Progress (count 0,
 		no processed or skipped ids) if nothing was saved yet.
 	What it does:
-		Reads the dataset's progress file. Raises ValueError if the file is
+		Reads the dataset's progress file. Raises IngestError if the file is
 		damaged, is missing a field, or belongs to a different dataset.
 	"""
 	progress_path = get_progress_path(storage_path, dataset_name)
@@ -71,7 +73,7 @@ def load_progress(storage_path: str, dataset_name: str) -> Progress:
 		with open(progress_path, encoding="utf-8") as progress_file:
 			saved_data = json.load(progress_file)
 	except json.JSONDecodeError as decode_error:
-		raise ValueError("progress file is damaged and cannot be read: " + progress_path + " (" + str(decode_error) + ")")
+		raise IngestError("progress file is damaged and cannot be read: " + progress_path + " (" + str(decode_error) + ")")
 
 	try:
 		progress = Progress(
@@ -81,10 +83,10 @@ def load_progress(storage_path: str, dataset_name: str) -> Progress:
 			skipped_doc_ids=saved_data["skipped_doc_ids"],
 		)
 	except (KeyError, TypeError) as missing_field_error:
-		raise ValueError("progress file is missing a field: " + progress_path + " (" + str(missing_field_error) + ")")
+		raise IngestError("progress file is missing a field: " + progress_path + " (" + str(missing_field_error) + ")")
 
 	if progress.dataset_name != dataset_name:
-		raise ValueError(
+		raise IngestError(
 			"progress file " + progress_path + " belongs to dataset "
 			+ repr(progress.dataset_name) + ", not " + repr(dataset_name)
 		)

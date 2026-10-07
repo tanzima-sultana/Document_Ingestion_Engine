@@ -21,6 +21,7 @@ from doc_ingest.dataset_config import get_extension_of_file
 from doc_ingest.dataset_config import get_hugging_face_file_url
 from doc_ingest.dataset_config import list_dataset_files
 from doc_ingest.dataset_config import unwrap_file_values
+from doc_ingest.text_cleanup import describe_error
 
 # Largest number of rows read in one batch, so a large request does not
 # hold every document's bytes in memory at once. The caller asks again
@@ -55,11 +56,14 @@ class RawDataBatch:
 	rows_read: source rows read for this batch, including rows that
 		failed to decode or have an unsupported document type.
 	downloaded: rows whose bytes were downloaded/decoded successfully.
+	prepare_failed: downloaded rows whose type, source path or raw file
+		could not be worked out or saved.
 	source_exhausted: True if the source ran out of rows.
 	"""
 	raw_items: list[RawData]
 	rows_read: int
 	downloaded: int
+	prepare_failed: int
 	source_exhausted: bool
 
 class RawDataFetcher:
@@ -110,7 +114,9 @@ class RawDataFetcher:
 	def iterate_hugging_face_rows(self, rows_to_skip: int) -> Iterator:
 		"""
 		Input: rows_to_skip - number of rows already read in earlier runs.
-		Output: an iterator of row dicts, one per dataset row.
+		Output: an iterator of row dicts, one per dataset row. A row that
+			cannot be unwrapped is printed and given as None, so it still
+			counts as read.
 		What it does: opens the Hugging Face dataset in streaming mode, so
 			rows are downloaded as they are read, and skips the rows read
 			before.
@@ -124,7 +130,12 @@ class RawDataFetcher:
 		dataset = dataset.skip(rows_to_skip)
 
 		for row in dataset:
-			yield unwrap_file_values(row)
+			try:
+				unwrapped_row = unwrap_file_values(row)
+			except Exception as error:
+				print(f"Skipping row: could not be read: {describe_error(error)}")
+				unwrapped_row = None
+			yield unwrapped_row
 
 	def iterate_container_records(self, records_to_skip: int) -> Iterator:
 		"""
@@ -192,19 +203,31 @@ class RawDataFetcher:
 			(a JSON list cannot be read in parts) and yields the object, or
 			each item of the list. The file's own extension decides which,
 			since a folder can hold both.
+			A JSONL line, or a whole JSON file, that is not valid UTF-8 JSON
+			is printed and given as one None record, so it still counts as
+			read and resume keeps the same record positions.
 		"""
 		source_format = get_extension_of_file(container_file_path)
 
 		with open(container_file_path, "rb") as container_stream:
 			if source_format == "jsonl":
 				for raw_line in container_stream:
-					stripped_line = raw_line.decode("utf-8").strip()
-					if stripped_line == "":
-						continue
-					yield json.loads(stripped_line)
+					try:
+						stripped_line = raw_line.decode("utf-8").strip()
+						if stripped_line == "":
+							continue
+						record = json.loads(stripped_line)
+					except ValueError as error:
+						print(f"Skipping record in {container_file_path}: not valid JSON: {describe_error(error)}")
+						record = None
+					yield record
 				return
 
-			loaded_json = json.loads(container_stream.read().decode("utf-8"))
+			try:
+				loaded_json = json.loads(container_stream.read().decode("utf-8"))
+			except ValueError as error:
+				print(f"Skipping file {container_file_path}: not valid JSON: {describe_error(error)}")
+				loaded_json = None
 
 		if isinstance(loaded_json, list):
 			for record in loaded_json:
@@ -247,8 +270,12 @@ class RawDataFetcher:
 			  finds how this record's value is encoded (get_content_encoding)
 			  and turns it into bytes accordingly.
 			- Local file: reads the file.
-			Any failure is printed and the row is skipped (None).
+			Any failure is printed and the row is skipped (None). A None row
+			(could not be read, already printed) is skipped too.
 		"""
+		if row is None:
+			return None
+
 		try:
 			if self.dataset_config.content_field is not None:
 				raw_value = row[self.dataset_config.content_field]
@@ -270,7 +297,7 @@ class RawDataFetcher:
 				with open(row, "rb") as f:
 					raw_bytes = f.read()
 		except Exception as error:
-			print(f"Skipping row: decode/download failed: {type(error).__name__}: {error}")
+			print(f"Skipping row: decode/download failed: {describe_error(error)}")
 			return None
 
 		return raw_bytes
@@ -357,7 +384,10 @@ class RawDataFetcher:
 			decoded document's type and source path, and saves it to
 			raw/. Advances next_row_number by the rows read. Rows that fail to
 			decode or have an unsupported type are counted in
-			RawDataBatch.rows_read but not returned in raw_items.
+			RawDataBatch.rows_read but not returned in raw_items. Any other
+			failure for one row is printed and that row is skipped, except a
+			failure to write the raw file (OSError, e.g. disk full), which
+			stops the run because every later row would fail too.
 		"""
 		rows_to_read = rows_needed
 		if rows_to_read > MAX_BATCH_ROWS:
@@ -384,6 +414,7 @@ class RawDataFetcher:
 
 		raw_items = []
 		downloaded = 0
+		prepare_failed = 0
 		for row_index in range(len(rows_to_decode)):
 			row = rows_to_decode[row_index]
 			row_number = first_row_number + row_index
@@ -391,17 +422,23 @@ class RawDataFetcher:
 			if raw_bytes is None:
 				continue
 			downloaded = downloaded + 1
-			doc_id = self.make_doc_id(raw_bytes)
+
 			try:
+				doc_id = self.make_doc_id(raw_bytes)
 				doc_type = self.get_document_type(row, raw_bytes)
+				if doc_type is None:
+					print(f"Skipping document {doc_id}: unsupported document type")
+					continue
+				source_path = self.get_source_path(row, row_number)
+				raw_path = self.save_raw_data(doc_id, raw_bytes, doc_type)
+			except OSError:
+				# Writing to the storage folder failed: stop the run
+				raise
 			except Exception as error:
-				print(f"Skipping document {doc_id}: document type could not be found: {type(error).__name__}: {error}")
+				print(f"Skipping row {row_number}: could not be prepared: {describe_error(error)}")
+				prepare_failed = prepare_failed + 1
 				continue
-			if doc_type is None:
-				print(f"Skipping document {doc_id}: unsupported document type")
-				continue
-			source_path = self.get_source_path(row, row_number)
-			raw_path = self.save_raw_data(doc_id, raw_bytes, doc_type)
+
 			raw_items.append(RawData(doc_id, doc_type, raw_path, source_path))
 
-		return RawDataBatch(raw_items, rows_read, downloaded, source_exhausted)
+		return RawDataBatch(raw_items, rows_read, downloaded, prepare_failed, source_exhausted)

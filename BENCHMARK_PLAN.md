@@ -64,9 +64,8 @@ pypdfium2) and loaders (LangChain, LlamaIndex, unstructured), with numbers.
 
 - Expected parallel speedup on 16 cores is about 10-14x, not 16x: each batch
   waits for its slowest documents, and moving data between processes costs time.
-- A batch of 256 documents split into pieces of 16 (`PARSE_DOC_COUNT`) gives
-  exactly 16 pieces. More than 16 parse workers needs a bigger batch or
-  smaller pieces.
+- Documents are sent to parse workers one at a time (so a worker that dies
+  costs only one document), 256 per batch.
 - Claims must be defensible, e.g. "same parser, N times faster end to end on
   M cores", "X% overhead over a plain pypdf loop", "removed Y% duplicates".
   Never claim faster text extraction than the parser itself.

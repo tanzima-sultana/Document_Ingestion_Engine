@@ -5,6 +5,13 @@ from doc_ingest.dataset_config import has_hugging_face_name_shape
 from doc_ingest.dataset_config import is_url
 
 
+class IngestError(ValueError):
+	"""
+	A problem the user can fix (bad input, unusable storage folder, damaged
+	progress file). The CLI prints only its message, without a traceback.
+	"""
+
+
 def validate_inputs(size: int, input_path: str, storage_path: str):
 	"""
 	Input:
@@ -71,13 +78,13 @@ def validate_size_is_positive(size):
 	Input:
 		size - the --size value, which must already be an int.
 	Output:
-		None. Raises ValueError if the check fails.
+		None. Raises IngestError if the check fails.
 	What it does:
 		Checks that size is greater than 0, so at least one document
 		will be processed.
 	"""
 	if size <= 0:
-		raise ValueError("size must be greater than 0, got " + str(size))
+		raise IngestError("size must be greater than 0, got " + str(size))
 
 
 def validate_input_path_is_not_empty(input_path):
@@ -85,7 +92,7 @@ def validate_input_path_is_not_empty(input_path):
 	Input:
 		input_path - the --input_path value.
 	Output:
-		None. Raises TypeError or ValueError if the check fails.
+		None. Raises TypeError or IngestError if the check fails.
 	What it does:
 		Checks that input_path is text and is not empty or made only of
 		spaces, tabs or newlines.
@@ -96,7 +103,7 @@ def validate_input_path_is_not_empty(input_path):
 
 	input_path_without_spaces = input_path.strip()
 	if input_path_without_spaces == "":
-		raise ValueError("input_path must not be empty, got " + repr(input_path))
+		raise IngestError("input_path must not be empty, got " + repr(input_path))
 
 
 def validate_input_path_is_not_ambiguous(input_path):
@@ -125,20 +132,20 @@ def validate_local_input_path_exists(input_path):
 	Input:
 		input_path - the --input_path value.
 	Output:
-		None. Raises ValueError if the check fails.
+		None. Raises IngestError if the check fails.
 	What it does:
 		Web URLs are not supported, so a URL fails. A Hugging Face dataset
 		name ("owner/name") passes. Anything else must be a local file or
 		folder that exists on this machine.
 	"""
 	if is_url(input_path):
-		raise ValueError("input_path must be a local path or a Hugging Face dataset name, web URLs are not supported: " + repr(input_path))
+		raise IngestError("input_path must be a local path or a Hugging Face dataset name, web URLs are not supported: " + repr(input_path))
 
 	if has_hugging_face_name_shape(input_path):
 		return
 
 	if not is_local_path(input_path):
-		raise ValueError("input_path does not exist on this machine: " + repr(input_path))
+		raise IngestError("input_path does not exist on this machine: " + repr(input_path))
 
 
 def validate_storage_path_is_not_empty(storage_path):
@@ -146,7 +153,7 @@ def validate_storage_path_is_not_empty(storage_path):
 	Input:
 		storage_path - the storage folder from cache.get_storage_path().
 	Output:
-		None. Raises TypeError or ValueError if the check fails.
+		None. Raises TypeError or IngestError if the check fails.
 	What it does:
 		Checks that storage_path is text and is not empty or made only of
 		spaces, tabs or newlines.
@@ -157,7 +164,7 @@ def validate_storage_path_is_not_empty(storage_path):
 
 	storage_path_without_spaces = storage_path.strip()
 	if storage_path_without_spaces == "":
-		raise ValueError("storage folder must not be empty, got " + repr(storage_path))
+		raise IngestError("storage folder must not be empty, got " + repr(storage_path))
 
 
 def validate_storage_path_is_not_a_file(storage_path):
@@ -165,7 +172,7 @@ def validate_storage_path_is_not_a_file(storage_path):
 	Input:
 		storage_path - the storage folder from cache.get_storage_path().
 	Output:
-		None. Raises ValueError if the check fails.
+		None. Raises IngestError if the check fails.
 	What it does:
 		If storage_path already exists, checks that it is a folder and not
 		a file. A path that does not exist yet passes, because it will be
@@ -177,7 +184,7 @@ def validate_storage_path_is_not_a_file(storage_path):
 
 	storage_path_is_folder = os.path.isdir(storage_path)
 	if not storage_path_is_folder:
-		raise ValueError("storage folder already exists and is a file, not a folder: " + repr(storage_path))
+		raise IngestError("storage folder already exists and is a file, not a folder: " + repr(storage_path))
 
 
 def validate_storage_path_is_outside_input_folder(input_path, storage_path):
@@ -186,7 +193,7 @@ def validate_storage_path_is_outside_input_folder(input_path, storage_path):
 		input_path - the --input_path value.
 		storage_path - the storage folder from cache.get_storage_path().
 	Output:
-		None. Raises ValueError if the check fails.
+		None. Raises IngestError if the check fails.
 	What it does:
 		If input_path is a local folder, checks that storage_path is not
 		that same folder and not anywhere inside it. Otherwise a later run
@@ -204,12 +211,12 @@ def validate_storage_path_is_outside_input_folder(input_path, storage_path):
 	real_storage_folder = os.path.realpath(storage_path)
 
 	if real_storage_folder == real_input_folder:
-		raise ValueError("storage folder must not be the same folder as input_path: " + repr(storage_path) + ". Set DOC_INGEST_CACHE_DIR to a folder outside it.")
+		raise IngestError("storage folder must not be the same folder as input_path: " + repr(storage_path) + ". Set DOC_INGEST_CACHE_DIR to a folder outside it.")
 
 	shared_parent_folder = os.path.commonpath([real_input_folder, real_storage_folder])
 	storage_is_inside_input = shared_parent_folder == real_input_folder
 	if storage_is_inside_input:
-		raise ValueError("storage folder must not be inside the input_path folder: " + repr(storage_path) + ". Set DOC_INGEST_CACHE_DIR to a folder outside it.")
+		raise IngestError("storage folder must not be inside the input_path folder: " + repr(storage_path) + ". Set DOC_INGEST_CACHE_DIR to a folder outside it.")
 
 
 def validate_storage_path_is_writable(storage_path):
@@ -217,7 +224,7 @@ def validate_storage_path_is_writable(storage_path):
 	Input:
 		storage_path - the storage folder from cache.get_storage_path().
 	Output:
-		None. Raises ValueError if the check fails.
+		None. Raises IngestError if the check fails.
 	What it does:
 		Creates the storage_path folder if it does not exist yet, then
 		writes a small temporary test file inside it and deletes it again.
@@ -228,13 +235,13 @@ def validate_storage_path_is_writable(storage_path):
 	try:
 		os.makedirs(storage_path, exist_ok=True)
 	except OSError as create_error:
-		raise ValueError("storage folder could not be created: " + repr(storage_path) + " (" + str(create_error) + ")")
+		raise IngestError("storage folder could not be created: " + repr(storage_path) + " (" + str(create_error) + ")")
 
 	try:
 		with tempfile.TemporaryFile(dir=storage_path) as test_file:
 			test_file.write(b"write test")
 	except OSError as write_error:
-		raise ValueError("storage folder is not writable: " + repr(storage_path) + " (" + str(write_error) + ")")
+		raise IngestError("storage folder is not writable: " + repr(storage_path) + " (" + str(write_error) + ")")
 
 
 def is_local_path(path):

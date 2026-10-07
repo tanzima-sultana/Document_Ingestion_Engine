@@ -15,10 +15,20 @@ already finished being defined.
 
 import abc
 import hashlib
+import signal
+import threading
 import time 
 
 from doc_ingest.schema import Document
 from doc_ingest.raw_data import RawData
+from doc_ingest.text_cleanup import describe_error
+
+# Longest time one document may take to parse before it is skipped
+PARSE_TIMEOUT_SECONDS = 120
+
+
+class ParseTimeoutError(Exception):
+	"""Raised when one document takes longer than PARSE_TIMEOUT_SECONDS to parse."""
 
 class Parser(abc.ABC):
 	@abc.abstractmethod
@@ -63,15 +73,44 @@ def parse_document(raw_data: RawData) -> tuple:
 		raw_path of its saved raw file).
 	Output: (doc_id, document). On failure, document is None.
 	What it does: picks the parser for raw_data.doc_type and parses the
-		raw file, in a parse worker process. Parse errors are not
-		raised; the document is returned as None instead.
+		raw file, in a parse worker process. Parse errors, and parsing
+		longer than PARSE_TIMEOUT_SECONDS, are not raised; the reason is
+		printed and the document is returned as None instead.
 	"""
-	
+	timeout_is_set = start_parse_timeout()
 	try:
 		parser_cls = get_parser(raw_data.doc_type)
 		parser = parser_cls()
 		document = parser.parse(raw_data)
 	except Exception as error:
+		print(f"Parse failed for document {raw_data.doc_id}: {describe_error(error)}")
 		return raw_data.doc_id, None
+	finally:
+		if timeout_is_set:
+			signal.alarm(0)
 
 	return raw_data.doc_id, document
+
+
+def start_parse_timeout() -> bool:
+	"""
+	Input: none. Output: True if a time limit was set, else False.
+	Makes ParseTimeoutError be raised after PARSE_TIMEOUT_SECONDS. Only
+	possible on systems with SIGALRM (not Windows) and in the main thread.
+	"""
+	if not hasattr(signal, "SIGALRM"):
+		return False
+	if threading.current_thread() is not threading.main_thread():
+		return False
+
+	signal.signal(signal.SIGALRM, raise_parse_timeout)
+	signal.alarm(PARSE_TIMEOUT_SECONDS)
+	return True
+
+
+def raise_parse_timeout(signal_number, stack_frame):
+	"""
+	Input: the signal number and current stack frame (given by Python).
+	Output: none. Raises ParseTimeoutError to stop the parse in progress.
+	"""
+	raise ParseTimeoutError(f"parsing took longer than {PARSE_TIMEOUT_SECONDS} seconds")

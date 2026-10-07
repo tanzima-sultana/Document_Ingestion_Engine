@@ -16,6 +16,7 @@ import pypdf
 from doc_ingest.schema import DocumentType
 from doc_ingest.schema import Metadata
 from doc_ingest.raw_data import RawData
+from doc_ingest.text_cleanup import fix_broken_characters
 
 
 def extract_metadata(raw_data: RawData, raw_bytes: bytes) -> Metadata:
@@ -76,14 +77,15 @@ def clean_property_text(value) -> str | None:
 	"""
 	Input: value - a property value as stored in the document, or None.
 	Output: the value as stripped text, or None if it is missing or blank.
-	What it does: turns the value into a string, strips whitespace and
-		null characters from its ends, and treats an empty result as
-		missing.
+	What it does: turns the value into a string, fixes broken characters
+		(fix_broken_characters), strips whitespace and null characters from
+		its ends, and treats an empty result as missing.
 	"""
 	if value is None:
 		return None
 
 	text = str(value)
+	text = fix_broken_characters(text)
 	text = text.strip()
 	text = text.strip("\x00")
 	text = text.strip()

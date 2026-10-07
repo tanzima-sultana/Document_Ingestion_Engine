@@ -10,6 +10,7 @@ import sys
 from doc_ingest import cache
 from doc_ingest.ingest import DEFAULT_DOWNLOAD_WORKERS
 from doc_ingest.ingest import ingest_documents
+from doc_ingest.validate import IngestError
 
 def parse_args(argument_list):
 	"""
@@ -75,8 +76,9 @@ if __name__ == "__main__":
 
 
 	# Ingestion. ingest_documents validates the inputs first.
-	# A ValueError (failed check or damaged progress file) prints a clean
-	# message (no traceback) and stops the program
+	# An IngestError (failed check or damaged progress file) prints a clean
+	# message (no traceback) and stops the program. Any other error is a
+	# bug or a system problem and keeps its full traceback.
 	try:
 		documents = ingest_documents(
 			size,
@@ -84,7 +86,7 @@ if __name__ == "__main__":
 			download_workers=download_workers,
 			parse_workers=parse_workers,
 		)
-	except ValueError as ingestion_error:
+	except IngestError as ingestion_error:
 		sys.stdout.flush()
 		print("Ingestion stopped: " + str(ingestion_error), file=sys.stderr)
 		sys.exit(1)

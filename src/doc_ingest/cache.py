@@ -1,9 +1,8 @@
 import os
 import json
 
-import pydantic
-
 from doc_ingest.schema import Document
+from doc_ingest.text_cleanup import describe_error
 
 # Name of this library's folder inside the user's cache folder
 CACHE_FOLDER_NAME = "doc_ingest"
@@ -60,21 +59,21 @@ def load_processed_document(storage_path: str, dataset_name: str, doc_id: str) -
 	What it does:
 		Reads the document's cached JSON file and turns it into a Document.
 		Pydantic checks the file against the schema while reading it. If
-		the file is not valid JSON, or a field is missing or has the wrong
-		type, a message is printed and None is returned, so one damaged
-		file does not stop the run.
+		the file cannot be read, is not valid UTF-8 JSON, or a field is
+		missing or has the wrong type, a message is printed and None is
+		returned, so one damaged file does not stop the run.
 	"""
 	processed_document_path = get_processed_document_path(storage_path, dataset_name, doc_id)
 	if not os.path.exists(processed_document_path):
 		return None
 
-	with open(processed_document_path, encoding="utf-8") as processed_document_file:
-		processed_document_json = processed_document_file.read()
-
+	# pydantic.ValidationError and UnicodeDecodeError are both ValueErrors
 	try:
+		with open(processed_document_path, encoding="utf-8") as processed_document_file:
+			processed_document_json = processed_document_file.read()
 		processed_document = Document.model_validate_json(processed_document_json)
-	except pydantic.ValidationError as validation_error:
-		print(f"Cached document {doc_id} is damaged: {processed_document_path} ({validation_error.error_count()} error(s))")
+	except (OSError, ValueError) as load_error:
+		print(f"Cached document {doc_id} is damaged: {processed_document_path} ({describe_error(load_error)})")
 		return None
 
 	return processed_document
@@ -99,9 +98,13 @@ def save_processed_document(storage_path: str, dataset_name: str, document: Docu
 	processed_document_path = get_processed_document_path(storage_path, dataset_name, document.id)
 	temporary_document_path = f"{processed_document_path}.tmp"
 
+	# Turned into JSON before any file is opened, so a document that cannot
+	# be saved as JSON leaves no empty temporary file behind
+	document_json = document.model_dump_json()
+
 	os.makedirs(os.path.dirname(processed_document_path), exist_ok=True)
 
 	with open(temporary_document_path, "w", encoding="utf-8") as f:
-		f.write(document.model_dump_json())
+		f.write(document_json)
 
 	os.replace(temporary_document_path, processed_document_path)
