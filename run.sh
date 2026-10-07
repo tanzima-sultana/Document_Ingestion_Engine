@@ -18,7 +18,7 @@ fi
 export PYTHONPATH="$(pwd)/src"
 
 SIZE=5000
-INPUT_PATH="https://huggingface.co/datasets/superdoc-dev/docx-corpus"
+INPUT_PATH="pixparse/pdfa-eng-wds"
 # Benchmark runs use their own storage folder, never the shared ~/.cache/doc_ingest
 export DOC_INGEST_CACHE_DIR="$(pwd)/outputs"
 DOWNLOAD_WORKERS="${1:-64}"
