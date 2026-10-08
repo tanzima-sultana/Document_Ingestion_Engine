@@ -365,7 +365,7 @@ The expected speed-up on 16 cores was about 10-14x; the measured parse speed-up 
 **Not measured yet**
 
 - Peak memory use (the returned list holds every document's full text, which matters at 50k documents and more).
-- A plain pypdf loop on the same documents (to show the pipeline's own overhead), a larger run (50k), a second PDF parser (pypdfium2), and other loaders (LlamaIndex, unstructured) on the same set. These are the next steps of the benchmark plan in `BENCHMARK_PLAN.md`.
+- A plain pypdf loop on the same documents (to show the pipeline's own overhead), a larger run (50k), a second PDF parser (pypdfium2), and other loaders (LlamaIndex, unstructured) on the same set.
 - Cheap experiments that follow from the results: a larger `--max_batch_rows` (for example 1024) to reduce the "wait for the slowest document" pauses, and overlapping the download of the next batch with parsing of the current one.
 
 ## 8. Repo Structure
@@ -373,7 +373,6 @@ The expected speed-up on 16 cores was about 10-14x; the measured parse speed-up 
 ```
 DocIngestEngine/
 ├── README.md               this file
-├── BENCHMARK_PLAN.md       the benchmark plan: rules for every run, the steps done and still to do
 ├── CLAUDE.md               project instructions and conventions (code style, environment, file layout)
 ├── pyproject.toml          package definition: name, Python version, the four dependencies, the doc-ingest command
 ├── run.sh                  benchmark/run script (see Usage)
@@ -484,7 +483,7 @@ Notes:
 - **Count unsupported types correctly** once formats are being added: skip types without a registered parser before downloading them.
 - **A batch-by-batch API (`lazy_ingest`)**, planned after the RAG project that will use this library: instead of one list at the end, return one `IngestResult` per batch (that batch's kept documents and that batch's summary, for example 498 documents from a 500-row batch), saving progress before each batch is handed over so stopping early is safe. It will be a separate function next to `ingest_documents`, leaving the current API unchanged.
 - **Windows support for the parse time limit**, or at least a clear warning when it cannot be enforced.
-- **Benchmark plan** (`BENCHMARK_PLAN.md`): add peak memory to the measurements, benchmark a plain pypdf loop on the same documents to show the pipeline's overhead, run at 50k documents with the best setting (memory, disk, resume after an interruption, Hugging Face throttling), make the PDF parser selectable and compare pypdf with pypdfium2 (speed and text quality), and compare with other loaders (LlamaIndex `SimpleDirectoryReader`, `unstructured`) on the same set, as was done for LangChain `PyPDFLoader`.
+- **Benchmark plan**: add peak memory to the measurements, benchmark a plain pypdf loop on the same documents to show the pipeline's overhead, run at 50k documents with the best setting (memory, disk, resume after an interruption, Hugging Face throttling), make the PDF parser selectable and compare pypdf with pypdfium2 (speed and text quality), and compare with other loaders (LlamaIndex `SimpleDirectoryReader`, `unstructured`) on the same set, as was done for LangChain `PyPDFLoader`.
 - **Performance experiments** suggested by the results: a larger `max_batch_rows` (for example 1024) to reduce the waiting at the end of each batch, and overlapping the download of the next batch with the parsing of the current one.
 - **A RAG project built on top of this library**, where cleaned, deduplicated documents with source metadata feed chunking, embedding and retrieval. Its results will show which ingestion settings (for example the near-duplicate threshold) matter for answer quality.
 
