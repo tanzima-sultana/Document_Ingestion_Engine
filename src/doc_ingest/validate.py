@@ -1,3 +1,4 @@
+import importlib.util
 import logging
 import os
 import tempfile
@@ -7,17 +8,19 @@ from doc_ingest.dataset_hf import is_url
 from doc_ingest.error import IngestError
 from doc_ingest.settings import DownloadSettings
 from doc_ingest.settings import ProcessSettings
+from doc_ingest.settings import ParserSettings
+from doc_ingest.settings import PDF_PARSER_NAMES
 
 logger = logging.getLogger(__name__)
 
 
-def validate_inputs(size: int, input_path: str, storage_path: str | None, download_settings: DownloadSettings, process_settings: ProcessSettings):
+def validate_inputs(size: int, input_path: str, storage_path: str | None, download_settings: DownloadSettings, process_settings: ProcessSettings, parser_settings: ParserSettings):
 	"""
 	Input:
 		size - maximum number of documents to process.
 		input_path - where to read documents from.
 		storage_path - the cache_dir folder where raw files, processed documents and progress are stored (None: caching off, checks 10-13 are skipped).
-		download_settings, process_settings - the run's settings.
+		download_settings, process_settings, parser_settings - the run's settings.
 	Output:
 		None. Returns normally only if every check passes.
 	What it does:
@@ -46,6 +49,9 @@ def validate_inputs(size: int, input_path: str, storage_path: str | None, downlo
 
 	# 6. dedup_threshold must be a number greater than 0 and at most 1
 	validate_dedup_threshold_is_in_range(process_settings.dedup_threshold)
+
+	# 6b. pdf_parser must be a known PDF parser whose library is installed
+	validate_pdf_parser(parser_settings.pdf_parser)
 
 	# 7. input_path must not be empty or only spaces
 	validate_input_path_is_not_empty(input_path)
@@ -152,6 +158,23 @@ def validate_dedup_threshold_is_in_range(dedup_threshold):
 
 	if dedup_threshold > 1:
 		raise IngestError("dedup_threshold must be at most 1, got " + str(dedup_threshold))
+
+
+def validate_pdf_parser(pdf_parser):
+	"""
+	Input: pdf_parser - the chosen PDF parsing library.
+	Output: None. Raises TypeError if it is not text, IngestError if it is not a known parser or its library is not installed.
+	"""
+	if not isinstance(pdf_parser, str):
+		raise TypeError("pdf_parser must be text, got " + type(pdf_parser).__name__ + ": " + repr(pdf_parser))
+
+	if pdf_parser not in PDF_PARSER_NAMES:
+		raise IngestError("pdf_parser must be one of " + str(PDF_PARSER_NAMES) + ", got " + repr(pdf_parser))
+
+	# The library name is also its import name (pypdf, pypdfium2)
+	library_spec = importlib.util.find_spec(pdf_parser)
+	if library_spec is None:
+		raise IngestError("pdf_parser " + repr(pdf_parser) + " needs the " + pdf_parser + " package: pip install " + pdf_parser)
 
 
 def validate_input_path_is_not_empty(input_path):

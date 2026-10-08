@@ -23,6 +23,7 @@ from doc_ingest import cache
 from doc_ingest import parser
 from doc_ingest.settings import DownloadSettings
 from doc_ingest.settings import ProcessSettings
+from doc_ingest.settings import ParserSettings
 
 logger = logging.getLogger(__name__)
 
@@ -43,9 +44,9 @@ class IngestEngine:
 	so each step can be a method instead of a function with many parameters.
 	"""
 
-	def __init__(self, size: int, input_path: str, download_settings: DownloadSettings, process_settings: ProcessSettings, cache_dir: str | None):
+	def __init__(self, size: int, input_path: str, download_settings: DownloadSettings, process_settings: ProcessSettings, parser_settings: ParserSettings, cache_dir: str | None):
 		"""
-		Input: size, input_path, the run's DownloadSettings and ProcessSettings, and cache_dir (None: caching off).
+		Input: size, input_path, the run's DownloadSettings, ProcessSettings and ParserSettings, and cache_dir (None: caching off).
 		Output: a new engine with empty run state. Nothing is checked, downloaded or parsed yet.
 		"""
 		self.run_start = time.perf_counter()
@@ -53,6 +54,7 @@ class IngestEngine:
 		self.input_path = input_path
 		self.download_settings = download_settings
 		self.process_settings = process_settings
+		self.parser_settings = parser_settings
 
 		# Caching off: parse workers still read raw files from disk, so they go
 		# to a temporary folder that is removed before the documents are returned.
@@ -91,7 +93,7 @@ class IngestEngine:
 		# A Hugging Face dataset page URL is turned into the dataset name first.
 		self.input_path = dataset_hf.normalize_input_path(self.input_path)
 		# Storage folder checks only apply to a cache_dir the user chose, not to the temporary folder
-		validate.validate_inputs(self.size, self.input_path, self.cache_dir, self.download_settings, self.process_settings)
+		validate.validate_inputs(self.size, self.input_path, self.cache_dir, self.download_settings, self.process_settings, self.parser_settings)
 		self.deduplicator = Deduplicator(threshold=self.process_settings.dedup_threshold)
 
 		# 1. Get dataset config
@@ -230,7 +232,7 @@ class IngestEngine:
 		"""
 		futures = []
 		for raw_data in parse_items:
-			future = self.parse_executor.submit(parser.parse_document, raw_data, self.process_settings.parse_timeout_seconds)
+			future = self.parse_executor.submit(parser.parse_document, raw_data, self.process_settings.parse_timeout_seconds, self.parser_settings)
 			futures.append(future)
 
 		results = []
@@ -257,7 +259,7 @@ class IngestEngine:
 		for item_index in unfinished_indexes:
 			raw_data = parse_items[item_index]
 			try:
-				future = self.parse_executor.submit(parser.parse_document, raw_data, self.process_settings.parse_timeout_seconds)
+				future = self.parse_executor.submit(parser.parse_document, raw_data, self.process_settings.parse_timeout_seconds, self.parser_settings)
 				result = future.result()
 			except concurrent.futures.process.BrokenProcessPool:
 				logger.warning("Parse failed for document %s: its parse worker process died", raw_data.doc_id)
@@ -352,9 +354,9 @@ class IngestEngine:
 
 
 # --------------- CLI entry
-def ingest_documents(size: int, input_path: str, *, download_settings: DownloadSettings | None = None, process_settings: ProcessSettings | None = None, cache_dir: str | None = None) -> IngestResult:
+def ingest_documents(size: int, input_path: str, *, download_settings: DownloadSettings | None = None, process_settings: ProcessSettings | None = None, parser_settings: ParserSettings | None = None, cache_dir: str | None = None) -> IngestResult:
 	"""
-	Input: size - max documents to return; input_path - local file/folder or Hugging Face dataset; download_settings/process_settings - optional (None: all defaults); cache_dir - optional folder to cache in (None: caching off).
+	Input: size - max documents to return; input_path - local file/folder or Hugging Face dataset; download_settings/process_settings/parser_settings - optional (None: all defaults); cache_dir - optional folder to cache in (None: caching off).
 	Output: an IngestResult: .documents (up to size Documents) and .summary (the run's Summary).
 	What it does: downloads, parses and dedups documents in batches. With cache_dir, it also loads cached documents first and saves progress after each batch so a later run can resume.
 	"""
@@ -363,8 +365,10 @@ def ingest_documents(size: int, input_path: str, *, download_settings: DownloadS
 		download_settings = DownloadSettings()
 	if process_settings is None:
 		process_settings = ProcessSettings()
+	if parser_settings is None:
+		parser_settings = ParserSettings()
 
-	ingest_engine = IngestEngine(size, input_path, download_settings, process_settings, cache_dir)
+	ingest_engine = IngestEngine(size, input_path, download_settings, process_settings, parser_settings, cache_dir)
 	try:
 		ingest_result = ingest_engine.run()
 	finally:

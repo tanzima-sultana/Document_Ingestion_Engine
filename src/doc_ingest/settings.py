@@ -23,6 +23,11 @@ DEFAULT_PARSE_TIMEOUT_SECONDS = 120
 # Default Jaccard similarity at or above which two documents are near-duplicates
 DEFAULT_DEDUP_THRESHOLD = 0.90
 
+# PDF parsing libraries that can be chosen, and the default one.
+# pypdfium2 is an optional install (pip install doc-ingest[pdfium]).
+PDF_PARSER_NAMES = ["pypdf", "pypdfium2"]
+DEFAULT_PDF_PARSER = "pypdf"
+
 
 @dataclasses.dataclass
 class DownloadSettings:
@@ -44,3 +49,12 @@ class ProcessSettings:
 	parse_workers: int | None = None
 	parse_timeout_seconds: int = DEFAULT_PARSE_TIMEOUT_SECONDS
 	dedup_threshold: float = DEFAULT_DEDUP_THRESHOLD
+
+
+@dataclasses.dataclass
+class ParserSettings:
+	"""
+	Which library parses each document type: pdf_parser - "pypdf" (default) or "pypdfium2".
+	Every choice produces the same Document format; only the extracted text can differ.
+	"""
+	pdf_parser: str = DEFAULT_PDF_PARSER

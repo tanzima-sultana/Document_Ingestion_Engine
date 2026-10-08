@@ -9,6 +9,7 @@ from doc_ingest.ingest import ingest_documents
 from doc_ingest.schema import Document
 from doc_ingest.settings import DownloadSettings
 from doc_ingest.settings import ProcessSettings
+from doc_ingest.settings import ParserSettings
 
 __all__ = [
 	"ingest_documents",
@@ -17,4 +18,5 @@ __all__ = [
 	"Document",
 	"DownloadSettings",
 	"ProcessSettings",
+	"ParserSettings",
 ]

@@ -6,7 +6,7 @@ plus the registry mapping document type -> implementation, the lookup
 function, and parse_document, which ingest.py runs in parse worker
 processes.
 
-Concrete parsers (e.g. PDFParser) subclass Parser, so they import this
+Concrete parsers (e.g. PyPdfParser) subclass Parser, so they import this
 module. Importing them back at the top of this module would create a
 circular import, since this module would then depend on them too — so
 the registry is built lazily inside get_parser instead, once Parser has
@@ -24,6 +24,7 @@ from doc_ingest.schema import Document
 from doc_ingest.raw_data import RawData
 from doc_ingest.error import describe_error
 from doc_ingest.settings import DEFAULT_PARSE_TIMEOUT_SECONDS
+from doc_ingest.settings import ParserSettings
 
 logger = logging.getLogger(__name__)
 
@@ -47,41 +48,63 @@ class Parser(abc.ABC):
 		raise NotImplementedError
 
 
-def get_parser(doc_type: str) -> type[Parser]:
+def get_parser(doc_type: str, parser_settings: ParserSettings) -> type[Parser]:
 	"""
-	Input: doc_type - a document type (e.g. "pdf").
-	Output: the Parser class registered for that type.
-	What it does: looks the type up in the parser registry. Raises
-		ValueError if no parser is registered for it.
+	Input: doc_type - a document type (e.g. "pdf"); parser_settings - which library to use per type.
+	Output: the Parser class registered for that type and chosen library.
+	What it does: looks the type up in the parser registry, then picks the
+		library chosen in parser_settings. Raises ValueError if no parser
+		is registered for the type or the library.
 	"""
 	# imported here, not at module level, to avoid the circular import
 	# described above
-	from doc_ingest.parsers.pdf import PDFParser
+	from doc_ingest.parsers.pdf import PyPdfParser
+	from doc_ingest.parsers.pdf import PyPdfium2Parser
 
-	parser_registry: dict[str, type[Parser]] = {
-		"pdf": PDFParser,
+	# document type -> library name -> Parser class
+	parser_registry: dict[str, dict[str, type[Parser]]] = {
+		"pdf": {
+			"pypdf": PyPdfParser,
+			"pypdfium2": PyPdfium2Parser,
+		},
+	}
+
+	# document type -> the library chosen for it
+	chosen_parser_names = {
+		"pdf": parser_settings.pdf_parser,
 	}
 
 	if doc_type not in parser_registry:
 		raise ValueError(
 			f"Unknown doc_type '{doc_type}'. Registered types: {list(parser_registry.keys())}"
 		)
-	return parser_registry[doc_type]
 
-def parse_document(raw_data: RawData, parse_timeout_seconds: int = DEFAULT_PARSE_TIMEOUT_SECONDS) -> tuple:
+	parsers_for_type = parser_registry[doc_type]
+	chosen_parser_name = chosen_parser_names[doc_type]
+	if chosen_parser_name not in parsers_for_type:
+		raise ValueError(
+			f"Unknown {doc_type} parser '{chosen_parser_name}'. Registered parsers: {list(parsers_for_type.keys())}"
+		)
+	return parsers_for_type[chosen_parser_name]
+
+def parse_document(raw_data: RawData, parse_timeout_seconds: int = DEFAULT_PARSE_TIMEOUT_SECONDS, parser_settings: ParserSettings | None = None) -> tuple:
 	"""
 	Input: raw_data - the document to parse (doc_id, doc_type and
 		raw_path of its saved raw file); parse_timeout_seconds - time limit
-		for this document.
+		for this document; parser_settings - which library to use per type
+		(None: the defaults).
 	Output: (doc_id, document). On failure, document is None.
-	What it does: picks the parser for raw_data.doc_type and parses the
+	What it does: picks the parser for raw_data.doc_type (and the chosen library) and parses the
 		raw file, in a parse worker process. Parse errors, and parsing
 		longer than parse_timeout_seconds, are not raised; the reason is
 		logged and the document is returned as None instead.
 	"""
+	if parser_settings is None:
+		parser_settings = ParserSettings()
+
 	timeout_is_set = start_parse_timeout(parse_timeout_seconds)
 	try:
-		parser_cls = get_parser(raw_data.doc_type)
+		parser_cls = get_parser(raw_data.doc_type, parser_settings)
 		parser = parser_cls()
 		document = parser.parse(raw_data)
 	except Exception as error:

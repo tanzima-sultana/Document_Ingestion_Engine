@@ -9,6 +9,12 @@ dependencies = [
 	"pypdf>=6.0",
 ]
 
+# Optional PDF parser: pip install doc-ingest[pdfium], then pdf_parser="pypdfium2"
+[project.optional-dependencies]
+pdfium = [
+	"pypdfium2>=5.0",
+]
+
 # Installs a "doc-ingest" command that runs the same main() as python -m doc_ingest
 [project.scripts]
 doc-ingest = "doc_ingest.__main__:main"

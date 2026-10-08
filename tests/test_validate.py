@@ -10,6 +10,7 @@ from doc_ingest import validate
 from doc_ingest.error import IngestError
 from doc_ingest.settings import DownloadSettings
 from doc_ingest.settings import ProcessSettings
+from doc_ingest.settings import ParserSettings
 
 
 class TestValidateInputs(unittest.TestCase):
@@ -26,11 +27,11 @@ class TestValidateInputs(unittest.TestCase):
 
 	def validate_with_default_settings(self, size, input_path, storage_path):
 		"""Runs validate_inputs with default download and process settings."""
-		validate.validate_inputs(size, input_path, storage_path, DownloadSettings(), ProcessSettings())
+		validate.validate_inputs(size, input_path, storage_path, DownloadSettings(), ProcessSettings(), ParserSettings())
 
 	def validate_settings(self, download_settings, process_settings):
 		"""Runs validate_inputs with valid size and paths and the given settings."""
-		validate.validate_inputs(5, self.input_folder, self.output_folder, download_settings, process_settings)
+		validate.validate_inputs(5, self.input_folder, self.output_folder, download_settings, process_settings, ParserSettings())
 
 	def test_valid_inputs_pass(self):
 		"""Valid size and paths raise nothing."""
@@ -101,6 +102,15 @@ class TestValidateInputs(unittest.TestCase):
 			self.validate_settings(DownloadSettings(), ProcessSettings(dedup_threshold=1.5))
 		with self.assertRaises(TypeError):
 			self.validate_settings(DownloadSettings(), ProcessSettings(dedup_threshold="0.9"))
+
+	def test_pdf_parser(self):
+		"""pdf_parser must be text and one of the known PDF parsers."""
+		validate.validate_inputs(5, self.input_folder, self.output_folder, DownloadSettings(), ProcessSettings(), ParserSettings(pdf_parser="pypdf"))
+		with self.assertRaises(IngestError):
+			validate.validate_inputs(5, self.input_folder, self.output_folder, DownloadSettings(), ProcessSettings(), ParserSettings(pdf_parser="pymupdf"))
+		with self.assertRaises(TypeError):
+			validate.validate_inputs(5, self.input_folder, self.output_folder, DownloadSettings(), ProcessSettings(), ParserSettings(pdf_parser=None))
+
 
 if __name__ == "__main__":
 	unittest.main()

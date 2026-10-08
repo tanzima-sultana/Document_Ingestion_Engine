@@ -16,8 +16,11 @@ from doc_ingest.settings import DEFAULT_DOWNLOAD_WORKERS
 from doc_ingest.settings import DEFAULT_HUGGING_FACE_SPLIT
 from doc_ingest.settings import DEFAULT_MAX_BATCH_ROWS
 from doc_ingest.settings import DEFAULT_PARSE_TIMEOUT_SECONDS
+from doc_ingest.settings import DEFAULT_PDF_PARSER
+from doc_ingest.settings import PDF_PARSER_NAMES
 from doc_ingest.settings import DownloadSettings
 from doc_ingest.settings import ProcessSettings
+from doc_ingest.settings import ParserSettings
 
 
 def parse_args(argument_list):
@@ -25,8 +28,8 @@ def parse_args(argument_list):
 	Input:
 		argument_list - list of command line strings, usually sys.argv[1:].
 	Output:
-		argparse.Namespace with size, input_path, and every download and
-		process setting.
+		argparse.Namespace with size, input_path, and every download,
+		process and parser setting.
 	What it does:
 		Reads the options run.sh passes in. Only size and input_path are
 		required; every setting is optional and shown in its own --help
@@ -94,6 +97,15 @@ def parse_args(argument_list):
 		default=DEFAULT_DEDUP_THRESHOLD,
 		help="Similarity at or above which two documents are near-duplicates (default: %(default)s).",
 	)
+
+	parser_group = argument_parser.add_argument_group("parser settings")
+	parser_group.add_argument(
+		"--pdf_parser",
+		type=str,
+		choices=PDF_PARSER_NAMES,
+		default=DEFAULT_PDF_PARSER,
+		help="Library that parses PDFs; pypdfium2 needs pip install pypdfium2 (default: %(default)s).",
+	)
 	parsed_arguments = argument_parser.parse_args(argument_list)
 	return parsed_arguments
 
@@ -123,6 +135,9 @@ def main():
 		parse_timeout_seconds=args.parse_timeout_seconds,
 		dedup_threshold=args.dedup_threshold,
 	)
+	parser_settings = ParserSettings(
+		pdf_parser=args.pdf_parser,
+	)
 
 	print("Starting document ingestion")
 	print("  size        : " + str(size))
@@ -133,6 +148,7 @@ def main():
 		print("  cache_dir   : " + cache_dir)
 	print("  download_settings : " + str(download_settings))
 	print("  process_settings  : " + str(process_settings))
+	print("  parser_settings   : " + str(parser_settings))
 
 
 	# Ingestion. ingest_documents validates the inputs first.
@@ -145,6 +161,7 @@ def main():
 			input_path,
 			download_settings=download_settings,
 			process_settings=process_settings,
+			parser_settings=parser_settings,
 			cache_dir=cache_dir,
 		)
 	except IngestError as ingestion_error:
