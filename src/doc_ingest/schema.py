@@ -25,6 +25,7 @@ class Metadata(BaseModel):
 	file_size_bytes: int = Field(..., ge=0, description="Size of the raw input file")
 	content_hash: str = Field(..., description="SHA-256 hash of raw bytes for exact deduplication")
 	minhash_signature: list[int] | None = Field(None, description="MinHash/LSH signature")
+	page_count: int | None = Field(None, ge=0, description="Number of pages (None for types without pages)")
 	author: str | None = None
 	title: str | None = None
 	creation_date: str | None = None

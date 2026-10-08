@@ -36,6 +36,9 @@ class Summary:
 	skipped: int = 0
 	duplicate: int = 0
 
+	# Pages of every parsed document (kept, empty or duplicate), for pages/second
+	pages_parsed: int = 0
+
 	# Timing
 	total_seconds: float = 0.0
 	download_seconds: float = 0.0
@@ -64,3 +67,8 @@ def print_run_summary(summary: Summary) -> None:
 	logger.info("Skipped %s document(s) in total.", summary.skipped)
 	logger.info("Skipped %s document(s) due to duplicate detection.", summary.duplicate)
 	logger.info("Total time: %.1fs (download %.1fs, parse %.1fs)", summary.total_seconds, summary.download_seconds, summary.parse_seconds)
+
+	pages_per_second = 0.0
+	if summary.parse_seconds > 0:
+		pages_per_second = summary.pages_parsed / summary.parse_seconds
+	logger.info("Pages parsed: %s (%.1f pages/second of parse time)", summary.pages_parsed, pages_per_second)

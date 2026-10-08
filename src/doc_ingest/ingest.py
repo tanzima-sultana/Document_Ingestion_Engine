@@ -273,6 +273,9 @@ class IngestEngine:
 				self.summary.parse_error += 1
 				continue
 
+			if doc.metadata.page_count is not None:
+				self.summary.pages_parsed += doc.metadata.page_count
+
 			try:
 				# No text, e.g. a scanned PDF
 				if doc.text.strip() == "":

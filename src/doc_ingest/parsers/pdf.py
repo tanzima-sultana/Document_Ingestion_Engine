@@ -62,6 +62,7 @@ class PDFParser(Parser):
 		# Metadata: generic fields, then the PDF's own properties
 		doc_metadata = extract_metadata(raw_data, raw_bytes)
 		self.fill_pdf_properties(doc_metadata, reader)
+		doc_metadata.page_count = len(page_texts)
 
 		document = Document(
 			id=doc_id,
