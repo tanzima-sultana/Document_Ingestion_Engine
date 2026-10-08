@@ -38,7 +38,7 @@ def make_progress(dataset_name: str, raw_data_count: int, processed_doc_ids: lis
 def get_progress_path(storage_path: str, dataset_name: str) -> str:
 	"""
 	Input:
-		storage_path - the storage folder (cache.get_storage_path()).
+		storage_path - the cache folder (cache_dir given to ingest_documents).
 		dataset_name - name of the dataset (from get_dataset_name).
 	Output:
 		Path of this dataset's progress file, for example
@@ -54,7 +54,7 @@ def get_progress_path(storage_path: str, dataset_name: str) -> str:
 def load_progress(storage_path: str, dataset_name: str) -> Progress:
 	"""
 	Input:
-		storage_path - the storage folder (cache.get_storage_path()).
+		storage_path - the cache folder (cache_dir given to ingest_documents).
 		dataset_name - name of the dataset (from get_dataset_name).
 	Output:
 		The saved Progress for this dataset, or an empty Progress (count 0,
@@ -97,7 +97,7 @@ def load_progress(storage_path: str, dataset_name: str) -> Progress:
 def save_progress(storage_path: str, dataset_name: str, progress: Progress) -> None:
 	"""
 	Input:
-		storage_path - the storage folder (cache.get_storage_path()).
+		storage_path - the cache folder (cache_dir given to ingest_documents).
 		dataset_name - name of the dataset (from get_dataset_name).
 		progress - the Progress to save.
 	Output:

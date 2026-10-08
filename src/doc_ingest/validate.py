@@ -11,12 +11,12 @@ from doc_ingest.settings import ProcessSettings
 logger = logging.getLogger(__name__)
 
 
-def validate_inputs(size: int, input_path: str, storage_path: str, download_settings: DownloadSettings, process_settings: ProcessSettings):
+def validate_inputs(size: int, input_path: str, storage_path: str | None, download_settings: DownloadSettings, process_settings: ProcessSettings):
 	"""
 	Input:
 		size - maximum number of documents to process.
 		input_path - where to read documents from.
-		storage_path - folder where raw files, processed documents and progress are stored.
+		storage_path - the cache_dir folder where raw files, processed documents and progress are stored (None: caching off, checks 10-13 are skipped).
 		download_settings, process_settings - the run's settings.
 	Output:
 		None. Returns normally only if every check passes.
@@ -55,6 +55,10 @@ def validate_inputs(size: int, input_path: str, storage_path: str, download_sett
 
 	# 9. input_path must be a local path that exists or a Hugging Face dataset name
 	validate_local_input_path_exists(input_path)
+
+	# Caching off: there is no storage folder to check
+	if storage_path is None:
+		return
 
 	# 10. storage_path must not be empty or only spaces
 	validate_storage_path_is_not_empty(storage_path)
@@ -214,7 +218,7 @@ def validate_local_input_path_exists(input_path):
 def validate_storage_path_is_not_empty(storage_path):
 	"""
 	Input:
-		storage_path - the storage folder from cache.get_storage_path().
+		storage_path - the cache folder (cache_dir given to ingest_documents).
 	Output:
 		None. Raises TypeError or IngestError if the check fails.
 	What it does:
@@ -233,7 +237,7 @@ def validate_storage_path_is_not_empty(storage_path):
 def validate_storage_path_is_not_a_file(storage_path):
 	"""
 	Input:
-		storage_path - the storage folder from cache.get_storage_path().
+		storage_path - the cache folder (cache_dir given to ingest_documents).
 	Output:
 		None. Raises IngestError if the check fails.
 	What it does:
@@ -254,7 +258,7 @@ def validate_storage_path_is_outside_input_folder(input_path, storage_path):
 	"""
 	Input:
 		input_path - the --input_path value.
-		storage_path - the storage folder from cache.get_storage_path().
+		storage_path - the cache folder (cache_dir given to ingest_documents).
 	Output:
 		None. Raises IngestError if the check fails.
 	What it does:
@@ -274,18 +278,18 @@ def validate_storage_path_is_outside_input_folder(input_path, storage_path):
 	real_storage_folder = os.path.realpath(storage_path)
 
 	if real_storage_folder == real_input_folder:
-		raise IngestError("storage folder must not be the same folder as input_path: " + repr(storage_path) + ". Set DOC_INGEST_CACHE_DIR to a folder outside it.")
+		raise IngestError("storage folder must not be the same folder as input_path: " + repr(storage_path) + ". Choose a cache_dir outside it.")
 
 	shared_parent_folder = os.path.commonpath([real_input_folder, real_storage_folder])
 	storage_is_inside_input = shared_parent_folder == real_input_folder
 	if storage_is_inside_input:
-		raise IngestError("storage folder must not be inside the input_path folder: " + repr(storage_path) + ". Set DOC_INGEST_CACHE_DIR to a folder outside it.")
+		raise IngestError("storage folder must not be inside the input_path folder: " + repr(storage_path) + ". Choose a cache_dir outside it.")
 
 
 def validate_storage_path_is_writable(storage_path):
 	"""
 	Input:
-		storage_path - the storage folder from cache.get_storage_path().
+		storage_path - the cache folder (cache_dir given to ingest_documents).
 	Output:
 		None. Raises IngestError if the check fails.
 	What it does:

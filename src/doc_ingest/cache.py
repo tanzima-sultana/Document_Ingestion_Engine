@@ -7,36 +7,11 @@ from doc_ingest.error import describe_error
 
 logger = logging.getLogger(__name__)
 
-# Name of this library's folder inside the user's cache folder
-CACHE_FOLDER_NAME = "doc_ingest"
-
-# Optional environment variable that sets the storage folder directly
-CACHE_DIR_ENV_VAR = "DOC_INGEST_CACHE_DIR"
-
-
-def get_storage_path() -> str:
-	"""
-	Input: none. Output: the folder where raw files, processed documents
-	and progress are stored: $DOC_INGEST_CACHE_DIR if set, else
-	$XDG_CACHE_HOME/doc_ingest if set, else ~/.cache/doc_ingest.
-	"""
-	chosen_storage_path = os.environ.get(CACHE_DIR_ENV_VAR, "")
-	if chosen_storage_path != "":
-		expanded_storage_path = os.path.expanduser(chosen_storage_path)
-		return expanded_storage_path
-
-	user_cache_folder = os.environ.get("XDG_CACHE_HOME", "")
-	if user_cache_folder == "":
-		user_cache_folder = os.path.join(os.path.expanduser("~"), ".cache")
-
-	storage_path = os.path.join(user_cache_folder, CACHE_FOLDER_NAME)
-	return storage_path
-
 
 def get_processed_document_path(storage_path: str, dataset_name: str, doc_id: str) -> str:
 	"""
 	Input:
-		storage_path - the storage folder (cache.get_storage_path()).
+		storage_path - the cache folder (cache_dir given to ingest_documents).
 		dataset_name - name of the dataset (from get_dataset_name).
 		doc_id - id of the processed document.
 	Output:
@@ -53,7 +28,7 @@ def get_processed_document_path(storage_path: str, dataset_name: str, doc_id: st
 def load_processed_document(storage_path: str, dataset_name: str, doc_id: str) -> Document | None:
 	"""
 	Input:
-		storage_path - the storage folder (cache.get_storage_path()).
+		storage_path - the cache folder (cache_dir given to ingest_documents).
 		dataset_name - name of the dataset (from get_dataset_name).
 		doc_id - id of the processed document.
 	Output:
@@ -84,7 +59,7 @@ def load_processed_document(storage_path: str, dataset_name: str, doc_id: str) -
 def save_processed_document(storage_path: str, dataset_name: str, document: Document):
 	"""
 	Input:
-		storage_path - the storage folder (cache.get_storage_path()).
+		storage_path - the cache folder (cache_dir given to ingest_documents).
 		dataset_name - name of the dataset (DatasetConfig.name).
 		document - the processed Document to cache.
 	Output:

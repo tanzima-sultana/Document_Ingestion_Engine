@@ -2,16 +2,16 @@
 
 ## 1. Introduction
 
-DocIngestEngine is a Python library and command line tool that turns a pile of raw documents into clean, deduplicated, structured documents that are ready to use downstream, for example as the knowledge base of a RAG system. You point it at a source, either a local file, a local folder of documents, JSONL/JSON files that hold many documents as records, or a Hugging Face dataset (by its name like `owner/name` or by its dataset page URL, streamed so the whole dataset is never downloaded at once), and tell it how many documents you want. It reads the source in batches, downloads/decodes each document, works out its type, parses it in parallel worker processes, cleans the extracted text (removes repeated headers and footers, page numbers, icon characters, broken characters, extra whitespace and blank lines), extracts metadata (source, size, SHA-256 content hash, title, author, creation date), and drops exact duplicates (same content hash) and near duplicates (MinHash signatures with LSH). Every kept document is returned as a Pydantic `Document` (id, type, cleaned text, metadata) together with a run summary that counts what was kept and why anything was skipped. Runs are resumable: raw files, processed documents and progress are cached on disk, so a later or interrupted run continues where the last one stopped instead of starting over. One bad document never stops the run (it is skipped and counted), a parse worker process that crashes is recovered from, every document has a parse time limit (on Linux/macOS), and all inputs and settings are validated before any work starts. Download and parse parallelism, batch size, Hugging Face split, parse timeout and the near-duplicate threshold can all be tuned from Python or from the command line. Right now native text PDFs are parsed end to end; the parser design (one parser class per format, looked up by document type) is ready for more formats such as DOCX, PPTX, XLSX, HTML, Markdown and plain text.
+DocIngestEngine is a Python library and command line tool that turns a pile of raw documents into clean, deduplicated, structured documents that are ready to use downstream, for example as the knowledge base of a RAG system. You point it at a source, either a local file, a local folder of documents, JSONL/JSON files that hold many documents as records, or a Hugging Face dataset (by its name like `owner/name` or by its dataset page URL, streamed so the whole dataset is never downloaded at once), and tell it how many documents you want. It reads the source in batches, downloads/decodes each document, works out its type, parses it in parallel worker processes, cleans the extracted text (removes repeated headers and footers, page numbers, icon characters, broken characters, extra whitespace and blank lines), extracts metadata (source, size, SHA-256 content hash, title, author, creation date), and drops exact duplicates (same content hash) and near duplicates (MinHash signatures with LSH). Every kept document is returned as a Pydantic `Document` (id, type, cleaned text, metadata) together with a run summary that counts what was kept and why anything was skipped. Caching is optional and off by default: without it nothing is kept on disk after the run (raw files go to a temporary folder that is deleted before the documents are returned). With a `cache_dir`, raw files, processed documents and progress are cached there, so a later or interrupted run continues where the last one stopped instead of starting over. One bad document never stops the run (it is skipped and counted), a parse worker process that crashes is recovered from, every document has a parse time limit (on Linux/macOS), and all inputs and settings are validated before any work starts. Download and parse parallelism, batch size, Hugging Face split, parse timeout and the near-duplicate threshold can all be tuned from Python or from the command line. Right now native text PDFs are parsed end to end; the parser design (one parser class per format, looked up by document type) is ready for more formats such as DOCX, PPTX, XLSX, HTML, Markdown and plain text.
 
 Key results:
 
 - **5000 PDFs in 7.7 minutes:** ingesting 5000 documents streamed from the Hugging Face dataset `pixparse/pdfa-eng-wds` took 462 s with 64 download workers and 16 parse workers, versus 1754 s with 1 and 1, a 3.8x speed-up (20-core machine, 15 GB RAM).
 - **Parsing is the bottleneck, and parallel parsing fixes most of it:** going from 1 to 16 parse workers cut parse time from about 1340 s to about 320 s (about 4.2x). Download workers barely matter on this dataset (1 vs 64 download workers saved about 20 s), because the PDF bytes arrive inside the streamed rows.
 - **Same output no matter how it is tuned:** all four worker settings (1/1, 64/1, 1/16, 64/16) read the same 5101 rows and returned exactly the same result: 5000 documents kept, 94 skipped as parse failures (78 encrypted PDFs, 10 rows detected as plain text with no parser yet, 6 AES-encrypted PDFs) and 7 removed as duplicates.
-- **Fast resume:** documents already processed are loaded back from the cache instead of being parsed again, and their saved MinHash signatures are reused for duplicate checking, which made loading 1000 cached documents about 15x faster (0.10 s versus 1.49 s).
-- **Robust by design:** a run never stops because of one document; only a failure to write to the storage folder (for example a full disk) stops it, and the progress saved after the last batch lets the next run continue.
-- **Tested offline:** 57 tests cover validation, dataset detection, raw data reading, PDF parsing, text cleanup, deduplication, caching/progress and full end-to-end runs, without needing network access.
+- **Fast resume (with `cache_dir`):** documents already processed are loaded back from the cache instead of being parsed again, and their saved MinHash signatures are reused for duplicate checking, which made loading 1000 cached documents about 15x faster (0.10 s versus 1.49 s).
+- **Robust by design:** a run never stops because of one document; only a failure to write to disk (for example a full disk) stops it, and with a `cache_dir` the progress saved after the last batch lets the next run continue.
+- **Tested offline:** 58 tests cover validation, dataset detection, raw data reading, PDF parsing, text cleanup, deduplication, caching/progress and full end-to-end runs with caching on and off, without needing network access.
 
 ## 2. Tech Stack
 
@@ -38,13 +38,13 @@ Key results:
 - `dataclasses`: the internal records (`RawData`, `RawDataBatch`, `DatasetConfig`, `Progress`, `Summary`) and the settings (`DownloadSettings`, `ProcessSettings`) and the result (`IngestResult`).
 - `hashlib`: SHA-256 for document ids, content hashes and dataset names.
 - `urllib`: downloading files that a Hugging Face row only links to (`hf://` paths), and recognizing Hugging Face dataset page URLs.
-- `zipfile`, `base64`, `binascii`, `json`, `re`, `io`, `tempfile`, `os`: detecting Office files from their zip contents, decoding base64 content, reading JSONL/JSON records, text cleanup patterns, in-memory file handling, the storage folder write check, and file system work.
+- `zipfile`, `base64`, `binascii`, `json`, `re`, `io`, `tempfile`, `os`: detecting Office files from their zip contents, decoding base64 content, reading JSONL/JSON records, text cleanup patterns, in-memory file handling, the temporary raw-file folder when caching is off, the cache folder write check, and file system work.
 
 **Packaging and tooling**
 
 - **setuptools** with a `pyproject.toml` (`src/` layout). Installing the package (`pip install -e .`) adds a `doc-ingest` command; without installing, the tool runs as `python -m doc_ingest` or through `run.sh`.
 - **pytest** (tested with 9.1) runs the test suite. The tests themselves are written with the standard `unittest` module and build their own small PDFs in memory, so they need no network and no test data files. pytest is a development tool only and is not a runtime dependency.
-- **Bash**: `run.sh` is the benchmark/run script (activates the environment, sets `PYTHONPATH`, clears the storage folder, runs the tool and saves a log).
+- **Bash**: `run.sh` is the benchmark/run script (activates the environment, sets `PYTHONPATH`, clears its cache folder, runs the tool and saves a log).
 
 ## 3. Installation / Setup
 
@@ -52,7 +52,7 @@ Key results:
 
 - Python 3.10 or newer.
 - Internet access only if you ingest a Hugging Face dataset. Local files, local folders and JSONL/JSON files work fully offline, and so do the tests.
-- Enough disk space for the storage folder: every run keeps a copy of each downloaded raw document, one JSON file per processed document, and a small progress file (see Configuration for where this folder is).
+- Enough disk space for a copy of every raw document read in a run. With caching off they sit in a temporary folder until the run ends; with a `cache_dir` they are kept across runs, together with one JSON file per processed document and a small progress file (see Configuration).
 
 **Steps**
 
@@ -66,8 +66,8 @@ Key results:
 
 - Install pytest in the same environment (`pip install pytest`); it is a development tool, not a runtime dependency.
 - From the repository root, with the environment active and `PYTHONPATH` set to `src` (or the package installed), run `python -m pytest tests`. The standard library runner works as well: `python -m unittest discover -s tests`.
-- All 57 tests run offline in about 2 seconds. They create small PDFs in memory, write them to temporary folders and clean up after themselves, so they never touch the real storage folder and need no test data files or network access.
-- What they cover: input and settings validation, dataset type and format detection (local folders, single files, JSONL, Hugging Face names and URLs), raw data reading and resuming from a row count, PDF parsing and metadata, text cleanup, exact and near-duplicate detection (including reuse of saved MinHash signatures), cache and progress files, and full end-to-end ingestion runs including resuming from the cache.
+- All 58 tests run offline in about 3 seconds. They create small PDFs in memory, write them to temporary folders and clean up after themselves, so they never touch a real cache folder and need no test data files or network access.
+- What they cover: input and settings validation, dataset type and format detection (local folders, single files, JSONL, Hugging Face names and URLs), raw data reading and resuming from a row count, PDF parsing and metadata, text cleanup, exact and near-duplicate detection (including reuse of saved MinHash signatures), cache and progress files, and full end-to-end ingestion runs including resuming from the cache and running with caching off (checking nothing is left on disk).
 
 **Project conventions (for anyone changing the code)**
 
@@ -85,7 +85,7 @@ There are three ways to run DocIngestEngine. All of them end up calling the same
 - Run `./run.sh` from anywhere; it moves to the repository root itself, activates `~/pyenv`, loads `.env` if present, sets `PYTHONPATH`, and runs the tool.
 - The source and size are set at the top of the script: `SIZE=5000` and `INPUT_PATH="pixparse/pdfa-eng-wds"`. Every setting is also listed there as a variable (download workers, max batch rows, Hugging Face split, parse workers, parse timeout, dedup threshold), so you can change any of them by editing one line.
 - The two worker counts can be given as arguments: `./run.sh <download_workers> <parse_workers>`, for example `./run.sh 64 16`. Without arguments it uses 64 and 16.
-- Benchmark runs use their own storage folder, `outputs/` in the repository, never the shared user cache. **`run.sh` deletes `outputs/` before every run**, so each run starts from nothing (no raw files, no processed documents, no progress) and runs are comparable.
+- Benchmark runs cache into `outputs/` in the repository (`--cache_dir`). **`run.sh` deletes `outputs/` before every run**, so each run starts from nothing (no raw files, no processed documents, no progress) and runs are comparable.
 - Everything the run prints is shown on screen and also saved to `logs/log_<size>_download<download_workers>_parse<parse_workers>.txt`, for example `logs/log_5000_download64_parse16.txt`. Note that the file name only contains the size and the two worker counts, so runs that differ only in another setting overwrite each other's log.
 - The script fails with an error exit code if the tool fails (it uses `pipefail`, so the `tee` into the log does not hide the failure).
 
@@ -93,13 +93,14 @@ There are three ways to run DocIngestEngine. All of them end up calling the same
 
 - Run `python -m doc_ingest --size <number> --input_path <source>` with the environment active and `PYTHONPATH` pointing at `src`, or, after `pip install -e .`, simply `doc-ingest --size <number> --input_path <source>` from anywhere.
 - `--size` (how many documents you want) and `--input_path` (where to read them from) are required. Every other option is optional and falls back to its default (see Configuration); `--help` lists them in two groups, "download settings" and "process settings", with their defaults.
-- At the start it prints the size, input path, storage folder and the full download and process settings it will use. During the run it logs each batch ("Batch 3: fetching 4500 row(s).") and a warning for every document or row it skips, with the reason. At the end it logs the run summary and prints "Document ingestion finished".
-- Exit code 0 means the run finished. Exit code 1 with a single line "Ingestion stopped: <reason>" means a problem you can fix: a bad size, input path, storage folder or setting value, or a damaged progress file. Any other error (a bug, or the storage folder becoming unwritable, for example a full disk) stops the run with a full Python traceback, also with exit code 1; the progress saved after the last finished batch lets the next run continue.
+- `--cache_dir <folder>` turns caching on (see Configuration). Without it, caching is off and nothing is kept on disk after the run.
+- At the start it prints the size, input path, cache folder (or `off`) and the full download and process settings it will use. During the run it logs each batch ("Batch 3: fetching 4500 row(s).") and a warning for every document or row it skips, with the reason. At the end it logs the run summary and prints "Document ingestion finished".
+- Exit code 0 means the run finished. Exit code 1 with a single line "Ingestion stopped: <reason>" means a problem you can fix: a bad size, input path, cache folder or setting value, or a damaged progress file. Any other error (a bug, or the disk becoming unwritable, for example when it is full) stops the run with a full Python traceback, also with exit code 1; with a `cache_dir`, the progress saved after the last finished batch lets the next run continue.
 - Only `doc_ingest`'s own progress messages are shown at INFO level; other libraries (for example the HTTP library Hugging Face uses) only show warnings, so the log is not flooded with HTTP requests.
 
 **3. From your own Python code (for example a RAG pipeline)**
 
-- Import it with `from doc_ingest import ingest_documents` and call `ingest_documents(size, input_path)`. Optionally pass `download_settings=DownloadSettings(...)` and/or `process_settings=ProcessSettings(...)` (both importable from `doc_ingest`) to change any setting; leave them out to use the defaults.
+- Import it with `from doc_ingest import ingest_documents` and call `ingest_documents(size, input_path)`. Optionally pass `download_settings=DownloadSettings(...)` and/or `process_settings=ProcessSettings(...)` (both importable from `doc_ingest`) to change any setting; leave them out to use the defaults. Pass `cache_dir="<folder>"` to turn caching on; leave it out and nothing is kept on disk after the call.
 - The call returns an `IngestResult` with two fields:
   - `documents`: a list of up to `size` `Document` objects. It can be shorter than `size` if the source runs out of rows.
   - `summary`: the run's `Summary` with every count and timing (see below), so your code can check, for example, how many documents failed to parse, without reading logs.
@@ -132,20 +133,21 @@ There are three ways to run DocIngestEngine. All of them end up calling the same
 **What the summary contains**
 
 - The run: documents requested and returned, whether the dataset ran out of rows, and how many batches were read.
-- Rows and documents: raw rows read, rows downloaded/decoded, documents loaded from the cache, and documents newly processed.
+- Rows and documents: raw rows read, rows downloaded/decoded, documents loaded from the cache (always 0 with caching off), and documents newly processed.
 - Skipped, by reason: rows that failed to download/decode, documents with an unsupported type, rows that could not be prepared for parsing (type, source or raw file could not be worked out or saved), documents that failed to parse (including encrypted PDFs and parse time-outs), documents with no text (for example scanned PDFs), documents whose duplicate check or saving failed, cached documents missing or damaged on disk, the total skipped, and duplicates removed.
 - Timing: total time, download time and parse time (parse time includes duplicate checking and saving).
 
 **What is stored on disk, and how resuming works**
 
-- Everything is stored under the storage folder (see Configuration), in one folder per dataset named after the dataset plus a short hash of its full path or name (for example `pdfa-eng-wds_6b87b8a4`), so two inputs with the same folder name never share data. A Hugging Face split other than `train` is part of the name too (for example `pdfa-eng-wds_test_d6f9537c`), so two splits never share data either.
+- Caching off (the default): raw files are written to a temporary folder, because the parse workers read each document from disk, and the folder is deleted before the documents are returned, also when the run fails. No processed documents or progress are written, so every run starts from the first row. Everything below applies only with a `cache_dir`.
+- Everything is stored under `cache_dir` (see Configuration), in one folder per dataset named after the dataset plus a short hash of its full path or name (for example `pdfa-eng-wds_6b87b8a4`), so two inputs with the same folder name never share data. A Hugging Face split other than `train` is part of the name too (for example `pdfa-eng-wds_test_d6f9537c`), so two splits never share data either.
 - Inside it: `data/raw/<doc_id>.<type>` holds each downloaded raw document, `data/processed/<doc_id>.json` holds each kept document as JSON, and `progress.json` records how many source rows have been read so far, the ids of the processed documents and the ids of the skipped ones. The progress file is written to a temporary file first and then swapped into place, so a crash can never leave it half-written.
 - Running again with the same input continues from the saved progress:
   - Documents already processed are loaded back from `data/processed/` (with their saved MinHash signatures, so they are not hashed again) and count towards `size`. If they are already enough, nothing new is read at all.
   - Otherwise reading continues after the rows read by earlier runs, so no row is downloaded or parsed twice, and documents skipped before are not tried again.
   - A cached document that is missing or damaged on disk is marked as skipped and the run goes on.
 - Asking for a smaller `size` than before returns that many documents from the cache; asking for a larger one continues reading where the last run stopped.
-- To start over for a dataset, delete its folder in the storage folder (`run.sh` deletes its whole `outputs/` storage folder before every run).
+- To start over for a dataset, delete its folder in the cache folder (`run.sh` deletes its whole `outputs/` cache folder before every run).
 
 ## 5. Configuration
 
@@ -168,17 +170,16 @@ Only `size` and `input_path` are required. Everything else is optional and has a
 - `parse_timeout_seconds` (`--parse_timeout_seconds`, default **120**): the longest time one document may take to parse; a document that takes longer is skipped and counted as a parse failure, so one pathological PDF cannot stall the run. Must be a whole number of at least 1 (0 would switch the limit off, so it is rejected). Only enforced on systems with `SIGALRM` (Linux/macOS); on Windows it is accepted but has no effect.
 - `dedup_threshold` (`--dedup_threshold`, default **0.90**): the estimated similarity (Jaccard similarity of the documents' five-word sequences) at or above which a document counts as a near duplicate of one already kept and is dropped. Must be a number greater than 0 and at most 1 (0 would mark everything as a duplicate of the first document). Higher values drop only almost identical documents; lower values also drop documents that share a lot of text. The right value depends on the data and on what the documents are used for; exact duplicates (same bytes) are always dropped regardless of this setting.
 
-All settings are checked before any work starts, together with `size`, `input_path` and the storage folder. A value of the wrong type raises `TypeError`; a value out of range raises `IngestError`, which the command line tool shows as a single "Ingestion stopped: <reason>" line, for example "Ingestion stopped: download_workers must be at least 1, got 0".
+All settings are checked before any work starts, together with `size`, `input_path` and `cache_dir` when it is given. A value of the wrong type raises `TypeError`; a value out of range raises `IngestError`, which the command line tool shows as a single "Ingestion stopped: <reason>" line, for example "Ingestion stopped: download_workers must be at least 1, got 0".
 
-**Storage folder** (where raw files, processed documents and progress are kept)
+**Caching** (`cache_dir`, `--cache_dir`, default **off**)
 
-- Chosen in this order: the `DOC_INGEST_CACHE_DIR` environment variable if it is set (a leading `~` is expanded); otherwise `doc_ingest` inside `$XDG_CACHE_HOME` if that is set; otherwise `~/.cache/doc_ingest`. `run.sh` sets `DOC_INGEST_CACHE_DIR` to the repository's `outputs/` folder.
-- Checked before the run starts: it must not be empty text, must not be an existing file, must not be the input folder itself or a folder inside the input folder (otherwise the tool would read its own output as input), and must be creatable and writable (it is created if it does not exist, and a small test file is written and removed). The error messages suggest setting `DOC_INGEST_CACHE_DIR` to a folder outside the input when the location is the problem.
+- Off: nothing is kept on disk after the run (see "What is stored on disk" above). The library never writes to a folder you did not choose.
+- On: give a folder, from Python with `ingest_documents(..., cache_dir="<folder>")` or from the command line with `--cache_dir <folder>`. Raw files, processed documents and progress are kept there, so later runs resume and reuse them. A leading `~` is expanded. `run.sh` passes the repository's `outputs/` folder.
+- Checked before the run starts, only when given: it must not be empty text, must not be an existing file, must not be the input folder itself or a folder inside the input folder (otherwise the tool would read its own output as input), and must be creatable and writable (it is created if it does not exist, and a small test file is written and removed).
 
 **Environment variables**
 
-- `DOC_INGEST_CACHE_DIR`: the storage folder (above).
-- `XDG_CACHE_HOME`: the standard user cache location, used when `DOC_INGEST_CACHE_DIR` is not set.
 - `HF_TOKEN`: a Hugging Face access token, read by the Hugging Face libraries; optional for public datasets (higher rate limits), required for gated or private ones. `run.sh` loads it from `.env`.
 
 **Fixed values (not configurable, set in the code)**
@@ -197,21 +198,21 @@ All settings are checked before any work starts, together with `size`, `input_pa
 DocIngestEngine is a staged pipeline with a single public entry point. The layers, from the outside in:
 
 1. **Entry points**: `__init__.py` is what you import (it exposes `ingest_documents`, `IngestResult`, `IngestError`, `Document`, `DownloadSettings`, `ProcessSettings` and nothing else), and `__main__.py` is what you run from a terminal (`python -m doc_ingest`, the installed `doc-ingest` command, or `run.sh`). The command line tool only reads options, sets up logging, builds the two settings objects, calls `ingest_documents` and prints the result line; it contains no pipeline logic.
-2. **Orchestrator**: `ingest_documents` (in `ingest.py`) fills in default settings and runs one `IngestEngine`. `IngestEngine` holds the state of one run (documents collected so far, processed and skipped ids, rows read, the summary, the duplicate checker and the parse worker pool) and drives the steps below. Each step is a method, so the steps share state through the engine instead of passing many parameters around.
+2. **Orchestrator**: `ingest_documents` (in `ingest.py`) fills in default settings, runs one `IngestEngine`, and with caching off deletes its temporary folder afterwards. `IngestEngine` holds the state of one run (documents collected so far, processed and skipped ids, rows read, the summary, the duplicate checker and the parse worker pool) and drives the steps below. Each step is a method, so the steps share state through the engine instead of passing many parameters around.
 3. **Stage modules**: one module per job (dataset discovery, raw data fetching, parsing, cleanup, metadata, deduplication, caching, progress, validation, summary), each usable and testable on its own.
 
 **What happens in one run** (the numbered steps match the comments in `ingest.py`)
 
-- **Step 0, check everything first.** A Hugging Face dataset page URL is turned into the dataset name. Then `size`, `input_path`, the storage folder and every download/process setting are validated. Nothing is read, created or downloaded before this passes (the storage folder is only created as part of the last check). Only after validation is the duplicate checker created with the chosen threshold.
+- **Step 0, check everything first.** A Hugging Face dataset page URL is turned into the dataset name. Then `size`, `input_path`, `cache_dir` (only when given) and every download/process setting are validated. Nothing is read or downloaded before this passes, and the cache folder is only created as part of the last check (with caching off, the empty temporary folder already exists). Only after validation is the duplicate checker created with the chosen threshold.
 - **Step 1, describe the dataset.** `get_dataset_config` builds a `DatasetConfig`: the dataset's name (readable name plus a short hash, plus the split if not `train`), whether it is local or Hugging Face, its format (`folder`, `jsonl`/`json`, a single file's extension, or `hf`), which record field holds the documents (for record-based datasets), and how many documents it has when that can be known cheaply (a Hugging Face dataset's published row count, the number of supported files in a folder, 1 for a single file, unknown for JSONL/JSON). The format is worked out once and passed to the other helpers.
-- **Step 2, load progress.** `progress.json` for this dataset gives the number of source rows read by earlier runs, the processed document ids and the skipped ids. A missing file means a fresh start; a damaged one, one with a missing field, or one belonging to another dataset stops the run with an `IngestError`.
-- **Step 3, reuse the cache.** Each previously processed document is loaded from `data/processed/<id>.json` and added to the duplicate checker (reusing its saved MinHash signature). A missing or damaged file, or one that cannot be added to the duplicate checker, is marked as skipped and the run goes on. If the cache alone already has `size` documents, progress is saved (keeping the ids that were not needed this time) and the run ends here without reading the source at all.
+- **Step 2, load progress** (caching on only; caching off starts from the first row). `progress.json` for this dataset gives the number of source rows read by earlier runs, the processed document ids and the skipped ids. A missing file means a fresh start; a damaged one, one with a missing field, or one belonging to another dataset stops the run with an `IngestError`.
+- **Step 3, reuse the cache** (caching on only). Each previously processed document is loaded from `data/processed/<id>.json` and added to the duplicate checker (reusing its saved MinHash signature). A missing or damaged file, or one that cannot be added to the duplicate checker, is marked as skipped and the run goes on. If the cache alone already has `size` documents, progress is saved (keeping the ids that were not needed this time) and the run ends here without reading the source at all.
 - **Step 4, read the source in batches** until `size` documents are collected or the source runs out. The parse worker pool is started once before the loop and shut down after it, even if the run fails.
-  - **4a, fetch.** `RawDataFetcher` reads as many rows as documents are still missing, at most `max_batch_rows`, continuing after the rows read in earlier runs. The rows are downloaded/decoded in parallel threads (`download_workers`). For each decoded row it computes the document id from the bytes, works out the document type, records where it came from, and saves the bytes to `data/raw/<id>.<type>`. The result is a `RawDataBatch`: one `RawData` (id, type, raw file path, source) per prepared document, plus counts of rows read, downloaded and failed.
+  - **4a, fetch.** `RawDataFetcher` reads as many rows as documents are still missing, at most `max_batch_rows`, continuing after the rows read in earlier runs. The rows are downloaded/decoded in parallel threads (`download_workers`). For each decoded row it computes the document id from the bytes, works out the document type, records where it came from, and saves the bytes to `data/raw/<id>.<type>` (in the cache folder, or the temporary folder when caching is off). The result is a `RawDataBatch`: one `RawData` (id, type, raw file path, source) per prepared document, plus counts of rows read, downloaded and failed.
   - **4b, skip known failures.** Documents that were skipped in an earlier run (for example a PDF that failed to parse) are not tried again.
   - **4c, parse in parallel.** The documents are sent to the parse worker processes. In each worker, `parse_document` picks the parser for the document's type, sets the parse time limit, and returns `(id, Document)` or `(id, None)` on any failure; it never raises. Results come back in the same order as the documents went in, so a run is deterministic.
-  - **4d, decide what to keep.** For each result, in order: a failed parse is skipped; a document with no text (for example a scanned PDF) is skipped; an exact or near duplicate of a document already kept is dropped; anything else is saved to `data/processed/<id>.json` and added to the results. Because kept documents are checked in a fixed order, the first copy of a duplicate is always the one kept.
-  - **4e, save progress** (rows read so far, processed ids, skipped ids) after every batch, so an interrupted run loses at most the batch in progress.
+  - **4d, decide what to keep.** For each result, in order: a failed parse is skipped; a document with no text (for example a scanned PDF) is skipped; an exact or near duplicate of a document already kept is dropped; anything else is saved to `data/processed/<id>.json` (caching on only) and added to the results. Because kept documents are checked in a fixed order, the first copy of a duplicate is always the one kept.
+  - **4e, save progress** (caching on only: rows read so far, processed ids, skipped ids) after every batch, so an interrupted run loses at most the batch in progress.
 - **Finish.** The summary's final numbers are filled in, the run summary is logged, and an `IngestResult` (the list of documents and the summary) is returned.
 
 **How data flows between stages**
@@ -235,7 +236,7 @@ DocIngestEngine is a staged pipeline with a single public entry point. The layer
 - `text_cleanup.py`: format-independent cleanup of page texts (it takes plain strings, so every future parser can reuse it).
 - `metadata.py`: the generic metadata every format has (source, size, content hash) and small helpers that tidy property values (title/author text, dates); each parser fills in its own format's properties.
 - `dedup.py`: `Deduplicator` (exact and near-duplicate detection).
-- `cache.py`: where the storage folder is, and saving/loading processed documents as JSON.
+- `cache.py`: saving/loading processed documents as JSON.
 - `progress.py`: the `Progress` record and loading/saving `progress.json`.
 - `summary.py`: the `Summary` counters and logging the run summary.
 - `schema.py`: the Pydantic output models and the `DocumentType` values.
@@ -249,9 +250,9 @@ DocIngestEngine is a staged pipeline with a single public entry point. The layer
 
 **Failure handling**
 
-- The rule: **one bad document never stops a run**. Every stage catches failures per row or per document, logs a warning with the reason, counts it in the summary under its own reason, and moves on. A skipped document's id is stored in the progress file, so later runs do not try it again.
+- The rule: **one bad document never stops a run**. Every stage catches failures per row or per document, logs a warning with the reason, counts it in the summary under its own reason, and moves on. With a `cache_dir`, a skipped document's id is stored in the progress file, so later runs do not try it again.
 - What is skipped and counted: rows that cannot be read or decoded, documents of an unsupported type, rows whose type, source or raw file cannot be worked out or saved, parse failures (broken, non-PDF and encrypted files, time-outs, crashed workers), documents with no text, failures of the duplicate check or of saving a document, and cached documents that are missing or damaged.
-- What stops a run: a problem with the inputs, settings, storage folder or progress file (`IngestError`, shown as one clean line), and a failure to write to the storage folder during the run (`OSError`, for example a full disk), because every later document would fail in the same way. In that case the progress saved after the last finished batch lets the next run continue.
+- What stops a run: a problem with the inputs, settings, cache folder or progress file (`IngestError`, shown as one clean line), and a failure to write to disk during the run (`OSError`, for example a full disk), because every later document would fail in the same way. With a `cache_dir`, the progress saved after the last finished batch lets the next run continue.
 
 **Resumability and repeatability**
 
@@ -295,7 +296,7 @@ The parser design is a plug-in pattern: each format is one class that implements
 
 - The question: how much do download workers and parse workers each speed up a real ingestion run when streaming from Hugging Face?
 - Dataset: the first 5000 documents streamed from `pixparse/pdfa-eng-wds` (about 2.16 million English text PDFs, not gated), split `train`.
-- Every run used `run.sh`, which deletes the whole storage folder (raw files, processed documents and progress) before starting, so every run streamed and parsed everything from scratch. Same `--size 5000` every time.
+- Every run used `run.sh`, which deletes its whole cache folder `outputs/` (raw files, processed documents and progress) before starting, so every run streamed and parsed everything from scratch. Same `--size 5000` every time.
 - Settings other than the workers were the defaults: 256 rows per batch, 120 s parse time limit, 0.90 near-duplicate threshold.
 - Machine: 20 CPU cores, 15 GB RAM, Linux, Python 3.10.12, pypdf 6.16, with a Hugging Face token set (`HF_TOKEN`).
 - Each configuration was run once. Times come from the run summary: download time (reading the stream, decoding, saving raw files), parse time (parsing plus duplicate checking and saving processed documents) and total time. The full logs are in `logs/log_5000_download<d>_parse<p>.txt`.
@@ -359,7 +360,7 @@ DocIngestEngine/
 │       ├── __main__.py         command line tool (python -m doc_ingest / doc-ingest)
 │       ├── ingest.py           ingest_documents, IngestEngine (the run, step by step), IngestResult
 │       ├── settings.py         DownloadSettings and ProcessSettings, and every default value
-│       ├── validate.py         all up-front checks of inputs, settings and the storage folder
+│       ├── validate.py         all up-front checks of inputs, settings and the cache folder
 │       ├── error.py            IngestError and describe_error
 │       ├── schema.py           Pydantic output models: Document, Metadata, DocumentType
 │       ├── dataset_config.py   builds the DatasetConfig; record content field and encoding
@@ -371,7 +372,7 @@ DocIngestEngine/
 │       ├── text_cleanup.py     format-independent text cleanup
 │       ├── metadata.py         generic metadata and helpers for property values
 │       ├── dedup.py            Deduplicator: exact (hash) and near (MinHash/LSH) duplicates
-│       ├── cache.py            storage folder location; saving/loading processed documents
+│       ├── cache.py            saving/loading processed documents
 │       ├── progress.py         Progress record; loading/saving progress.json
 │       ├── summary.py          Summary counters and the run summary log
 │       └── parsers/            one parser per format
@@ -384,18 +385,18 @@ DocIngestEngine/
 │           ├── html.py             placeholder: web pages
 │           ├── md.py               placeholder: Markdown
 │           └── txt.py              placeholder: plain text, logs, code files
-├── tests/                  offline test suite (57 tests, unittest style, run with pytest or unittest)
+├── tests/                  offline test suite (58 tests, unittest style, run with pytest or unittest)
 │   ├── helpers.py              builds small PDFs in memory (normal, multi-page reports, encrypted) and writes test files
-│   ├── test_validate.py        input, settings and storage folder checks
+│   ├── test_validate.py        input, settings and cache folder checks
 │   ├── test_dataset_config.py  dataset kinds, formats, names, sizes, content field/encoding, Hugging Face helpers, type detection
 │   ├── test_raw_data.py        reading rows, per-document type and source, batch counts, resuming from a row count
 │   ├── test_pdf.py             PDF parsing, properties, page failures, parse_document failures, generic metadata
 │   ├── test_text_cleanup.py    header/footer removal, whitespace, icon characters, page joining
 │   ├── test_dedup.py           exact and near duplicates, cached documents, saved signature reuse
 │   ├── test_cache_progress.py  processed document cache and progress files
-│   └── test_ingest.py          full end-to-end runs, resuming from the cache, continuing after rows read
+│   └── test_ingest.py          full end-to-end runs, resuming from the cache, continuing after rows read, caching off
 ├── logs/                   benchmark logs written by run.sh (not in git)
-└── outputs/                run.sh's storage folder (raw, processed, progress; deleted before every run; not committed)
+└── outputs/                run.sh's cache folder (raw, processed, progress; deleted before every run; not committed)
 ```
 
 Notes:
@@ -430,7 +431,7 @@ Notes:
 - **All returned documents are held in memory** until the run ends, and the caller only gets them at the end. Fine at thousands of documents; at hundreds of thousands or millions memory becomes the limit.
 - **Resuming deep into a Hugging Face stream may be slow**: the rows read by earlier runs are skipped on the stream, and skipping a streamed dataset most likely still reads through those rows.
 - **A local folder is walked twice** when the dataset is described (once for its format, once to count its documents).
-- **The storage folder only grows**: `raw/` keeps a copy of every downloaded document, which matters for large runs. There is no cleanup option; delete the dataset's folder to start over.
+- **The cache folder only grows**: `raw/` keeps a copy of every downloaded document, which matters for large runs. There is no cleanup option; delete the dataset's folder to start over. With caching off, the temporary folder still holds every raw document of the run until the run ends.
 
 *Correctness and robustness edge cases*
 

@@ -5,6 +5,7 @@ import dataclasses
 import concurrent.futures.process
 import multiprocessing
 import os
+import tempfile
 import time
 
 from doc_ingest.schema import Document
@@ -42,9 +43,9 @@ class IngestEngine:
 	so each step can be a method instead of a function with many parameters.
 	"""
 
-	def __init__(self, size: int, input_path: str, download_settings: DownloadSettings, process_settings: ProcessSettings):
+	def __init__(self, size: int, input_path: str, download_settings: DownloadSettings, process_settings: ProcessSettings, cache_dir: str | None):
 		"""
-		Input: size, input_path, and the run's DownloadSettings and ProcessSettings.
+		Input: size, input_path, the run's DownloadSettings and ProcessSettings, and cache_dir (None: caching off).
 		Output: a new engine with empty run state. Nothing is checked, downloaded or parsed yet.
 		"""
 		self.run_start = time.perf_counter()
@@ -53,8 +54,17 @@ class IngestEngine:
 		self.download_settings = download_settings
 		self.process_settings = process_settings
 
-
-		self.storage_path = cache.get_storage_path()
+		# Caching off: parse workers still read raw files from disk, so they go
+		# to a temporary folder that is removed before the documents are returned.
+		# Caching on: a leading ~ in cache_dir means the user's home folder.
+		self.cache_dir = None
+		self.temporary_folder = None
+		if cache_dir is None:
+			self.temporary_folder = tempfile.TemporaryDirectory(prefix="doc_ingest_")
+			self.storage_path = self.temporary_folder.name
+		else:
+			self.cache_dir = os.path.expanduser(cache_dir)
+			self.storage_path = self.cache_dir
 
 		self.documents = {}
 		self.processed_doc_ids = []
@@ -75,27 +85,30 @@ class IngestEngine:
 		"""
 		Input: none (uses the engine's state).
 		Output: an IngestResult with up to size Documents and the run's Summary.
-		What it does: validates inputs, loads cached documents, then fetches and processes batches until size is reached or the dataset runs out.
+		What it does: validates inputs, loads cached documents (caching on only), then fetches and processes batches until size is reached or the dataset runs out.
 		"""
 		# 0. Validate inputs before any work is done.
 		# A Hugging Face dataset page URL is turned into the dataset name first.
 		self.input_path = dataset_hf.normalize_input_path(self.input_path)
-		validate.validate_inputs(self.size, self.input_path, self.storage_path, self.download_settings, self.process_settings)
+		# Storage folder checks only apply to a cache_dir the user chose, not to the temporary folder
+		validate.validate_inputs(self.size, self.input_path, self.cache_dir, self.download_settings, self.process_settings)
 		self.deduplicator = Deduplicator(threshold=self.process_settings.dedup_threshold)
 
 		# 1. Get dataset config
 		self.db_config = dataset_config.get_dataset_config(self.input_path, self.download_settings.hugging_face_split)
 
-		# 2. Load progress
-		saved_progress = progress.load_progress(self.storage_path, self.db_config.name)
-		self.raw_data_count = saved_progress.raw_data_count
-		self.skipped_doc_ids = set(saved_progress.skipped_doc_ids)
+		# 2 and 3 run only with caching on. Caching off starts from the first row with nothing skipped.
+		if self.cache_dir is not None:
+			# 2. Load progress
+			saved_progress = progress.load_progress(self.storage_path, self.db_config.name)
+			self.raw_data_count = saved_progress.raw_data_count
+			self.skipped_doc_ids = set(saved_progress.skipped_doc_ids)
 
-		# 3. Check cached processed documents
-		size_reached = self.load_cached_documents(saved_progress.processed_doc_ids)
-		if size_reached:
-			logger.info("Loaded %s already processed document(s). Nothing new to process.", len(self.documents))
-			return self.finish()
+			# 3. Check cached processed documents
+			size_reached = self.load_cached_documents(saved_progress.processed_doc_ids)
+			if size_reached:
+				logger.info("Loaded %s already processed document(s). Nothing new to process.", len(self.documents))
+				return self.finish()
 
 		# 4. Fetch raw data in batches, then process each batch
 		raw_data_fetcher = RawDataFetcher(self.input_path, self.storage_path, self.db_config, self.download_settings)
@@ -141,8 +154,9 @@ class IngestEngine:
 				self.process_parsed_documents(parsed_docs)
 				self.summary.parse_seconds += time.perf_counter() - parse_start
 
-				# 4e. Save progress after every batch
-				self.update_progress(self.processed_doc_ids)
+				# 4e. Caching on: save progress after every batch
+				if self.cache_dir is not None:
+					self.update_progress(self.processed_doc_ids)
 
 		finally:
 			self.parse_executor.shutdown()
@@ -290,7 +304,8 @@ class IngestEngine:
 					self.summary.duplicate += 1
 					continue
 
-				cache.save_processed_document(self.storage_path, self.db_config.name, doc)
+				if self.cache_dir is not None:
+					cache.save_processed_document(self.storage_path, self.db_config.name, doc)
 			except OSError:
 				# Writing to the storage folder failed: stop the run
 				raise
@@ -337,11 +352,11 @@ class IngestEngine:
 
 
 # --------------- CLI entry
-def ingest_documents(size: int, input_path: str, *, download_settings: DownloadSettings | None = None, process_settings: ProcessSettings | None = None) -> IngestResult:
+def ingest_documents(size: int, input_path: str, *, download_settings: DownloadSettings | None = None, process_settings: ProcessSettings | None = None, cache_dir: str | None = None) -> IngestResult:
 	"""
-	Input: size - max documents to return; input_path - local file/folder or Hugging Face dataset; download_settings/process_settings - optional (None: all defaults).
+	Input: size - max documents to return; input_path - local file/folder or Hugging Face dataset; download_settings/process_settings - optional (None: all defaults); cache_dir - optional folder to cache in (None: caching off).
 	Output: an IngestResult: .documents (up to size Documents) and .summary (the run's Summary).
-	What it does: loads cached documents first, then downloads, parses and dedups new ones in batches, saving progress after each batch so a later run can resume.
+	What it does: downloads, parses and dedups documents in batches. With cache_dir, it also loads cached documents first and saves progress after each batch so a later run can resume.
 	"""
 	# None, not DownloadSettings(), as the default: a default object would be shared by every call
 	if download_settings is None:
@@ -349,6 +364,11 @@ def ingest_documents(size: int, input_path: str, *, download_settings: DownloadS
 	if process_settings is None:
 		process_settings = ProcessSettings()
 
-	ingest_engine = IngestEngine(size, input_path, download_settings, process_settings)
-	ingest_result = ingest_engine.run()
+	ingest_engine = IngestEngine(size, input_path, download_settings, process_settings, cache_dir)
+	try:
+		ingest_result = ingest_engine.run()
+	finally:
+		# Caching off: remove the temporary raw files, also when the run fails
+		if ingest_engine.temporary_folder is not None:
+			ingest_engine.temporary_folder.cleanup()
 	return ingest_result

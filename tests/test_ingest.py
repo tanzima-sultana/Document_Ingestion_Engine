@@ -6,7 +6,6 @@ import json
 import os
 import tempfile
 import unittest
-import unittest.mock
 
 import helpers
 from doc_ingest.dataset_config import get_dataset_name
@@ -35,16 +34,19 @@ class TestIngestDocuments(unittest.TestCase):
 	def tearDown(self):
 		self.temporary_folder.cleanup()
 
-	def run_ingest(self, size):
-		"""Runs ingest_documents quietly; returns (documents, logged output)."""
+	def run_ingest(self, size, use_cache=True):
+		"""Runs ingest_documents quietly, caching in output_path unless use_cache is False; returns (documents, logged output)."""
+		cache_dir = None
+		if use_cache:
+			cache_dir = self.output_path
 		with self.assertLogs("doc_ingest", level="INFO") as captured_logs:
-			with unittest.mock.patch("doc_ingest.cache.get_storage_path", return_value=self.output_path):
-				ingest_result = ingest_documents(
-					size,
-					self.input_folder,
-					download_settings=DownloadSettings(download_workers=2),
-					process_settings=ProcessSettings(parse_workers=2),
-				)
+			ingest_result = ingest_documents(
+				size,
+				self.input_folder,
+				download_settings=DownloadSettings(download_workers=2),
+				process_settings=ProcessSettings(parse_workers=2),
+				cache_dir=cache_dir,
+			)
 		logged_output = "\n".join(captured_logs.output)
 		return ingest_result.documents, logged_output
 
@@ -92,6 +94,28 @@ class TestIngestDocuments(unittest.TestCase):
 		self.assertEqual(len(second_documents), 3)
 		self.assertIn("Documents 1 have been loaded from cache", second_output)
 		self.assertEqual(self.read_progress()["raw_data_count"], 7)
+
+	def list_temporary_ingest_folders(self):
+		"""Returns the names of doc_ingest's temporary folders in the system temp folder."""
+		folder_names = []
+		for entry_name in os.listdir(tempfile.gettempdir()):
+			if entry_name.startswith("doc_ingest_"):
+				folder_names.append(entry_name)
+		return folder_names
+
+	def test_run_without_cache(self):
+		"""Caching off returns the same documents and leaves nothing on disk, so a second run starts over."""
+		temporary_folders_before = self.list_temporary_ingest_folders()
+
+		documents, printed_output = self.run_ingest(20, use_cache=False)
+		self.assertEqual(len(documents), 3)
+		self.assertIn("Skipped 1 document(s) due to duplicate detection.", printed_output)
+		self.assertFalse(os.path.exists(self.output_path))
+		self.assertEqual(self.list_temporary_ingest_folders(), temporary_folders_before)
+
+		second_documents, second_output = self.run_ingest(20, use_cache=False)
+		self.assertEqual(len(second_documents), 3)
+		self.assertIn("Documents 0 have been loaded from cache", second_output)
 
 
 if __name__ == "__main__":

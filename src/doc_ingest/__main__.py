@@ -9,7 +9,6 @@ import logging
 import os
 import sys
 
-from doc_ingest import cache
 from doc_ingest.ingest import ingest_documents
 from doc_ingest.error import IngestError
 from doc_ingest.settings import DEFAULT_DEDUP_THRESHOLD
@@ -48,6 +47,12 @@ def parse_args(argument_list):
 		type=str,
 		required=True,
 		help="Local path, or Hugging Face dataset name (or its page URL), to read documents from.",
+	)
+	argument_parser.add_argument(
+		"--cache_dir",
+		type=str,
+		default=None,
+		help="Folder to cache documents and progress in, so a later run can resume (default: caching off).",
 	)
 
 	download_group = argument_parser.add_argument_group("download settings")
@@ -107,7 +112,7 @@ def main():
 	args = parse_args(sys.argv[1:])
 	size = args.size
 	input_path = args.input_path
-	storage_path = cache.get_storage_path()
+	cache_dir = args.cache_dir
 	download_settings = DownloadSettings(
 		download_workers=args.download_workers,
 		max_batch_rows=args.max_batch_rows,
@@ -122,7 +127,10 @@ def main():
 	print("Starting document ingestion")
 	print("  size        : " + str(size))
 	print("  input_path  : " + input_path)
-	print("  storage_path : " + storage_path)
+	if cache_dir is None:
+		print("  cache_dir   : off")
+	else:
+		print("  cache_dir   : " + cache_dir)
 	print("  download_settings : " + str(download_settings))
 	print("  process_settings  : " + str(process_settings))
 
@@ -137,6 +145,7 @@ def main():
 			input_path,
 			download_settings=download_settings,
 			process_settings=process_settings,
+			cache_dir=cache_dir,
 		)
 	except IngestError as ingestion_error:
 		sys.stdout.flush()
