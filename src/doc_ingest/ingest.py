@@ -31,11 +31,14 @@ logger = logging.getLogger(__name__)
 @dataclasses.dataclass
 class IngestResult:
 	"""
-	What ingest_documents returns: the collected Documents and the run's Summary
-	(counts by skip reason, duplicates, timings).
+	What ingest_documents returns: the collected Documents, the run's Summary
+	(counts by skip reason, duplicates, timings) and the cache folders the run used.
+	raw_dir and processed_dir are None when caching is off.
 	"""
 	documents: list[Document]
 	summary: Summary
+	raw_dir: str | None
+	processed_dir: str | None
 
 
 class IngestEngine:
@@ -339,8 +342,8 @@ class IngestEngine:
 	def finish(self) -> IngestResult:
 		"""
 		Input: none (uses the engine's state).
-		Output: an IngestResult with the collected Documents and the run's Summary.
-		What it does: fills in the final summary numbers and logs the run summary.
+		Output: an IngestResult with the collected Documents, the run's Summary and the raw/processed cache folders.
+		What it does: fills in the final summary numbers, logs the run summary and works out the cache folders (None when caching is off).
 		"""
 		self.summary.returned_size = len(self.documents)
 		self.summary.source_exhausted = self.source_exhausted
@@ -348,8 +351,17 @@ class IngestEngine:
 		self.summary.total_seconds = time.perf_counter() - self.run_start
 		print_run_summary(self.summary)
 
+		# Caching off: the raw files are in a temporary folder that is removed
+		# before the result is returned, so there is no folder to point to.
+		raw_dir = None
+		processed_dir = None
+		if self.cache_dir is not None:
+			dataset_folder = os.path.join(self.cache_dir, self.db_config.name, "data")
+			raw_dir = os.path.join(dataset_folder, "raw")
+			processed_dir = os.path.join(dataset_folder, "processed")
+
 		document_list = list(self.documents.values())
-		ingest_result = IngestResult(documents=document_list, summary=self.summary)
+		ingest_result = IngestResult(documents=document_list, summary=self.summary, raw_dir=raw_dir, processed_dir=processed_dir)
 		return ingest_result
 
 
@@ -357,7 +369,7 @@ class IngestEngine:
 def ingest_documents(size: int, input_path: str, *, download_settings: DownloadSettings | None = None, process_settings: ProcessSettings | None = None, parser_settings: ParserSettings | None = None, cache_dir: str | None = None) -> IngestResult:
 	"""
 	Input: size - max documents to return; input_path - local file/folder or Hugging Face dataset; download_settings/process_settings/parser_settings - optional (None: all defaults); cache_dir - optional folder to cache in (None: caching off).
-	Output: an IngestResult: .documents (up to size Documents) and .summary (the run's Summary).
+	Output: an IngestResult: .documents (up to size Documents), .summary (the run's Summary), .raw_dir and .processed_dir (cache folders, None when caching is off).
 	What it does: downloads, parses and dedups documents in batches. With cache_dir, it also loads cached documents first and saves progress after each batch so a later run can resume.
 	"""
 	# None, not DownloadSettings(), as the default: a default object would be shared by every call
