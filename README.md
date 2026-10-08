@@ -8,6 +8,7 @@ Key results:
 
 - **5000 PDFs in 7.7 minutes:** ingesting 5000 documents streamed from the Hugging Face dataset `pixparse/pdfa-eng-wds` took 462 s with 64 download workers and 16 parse workers, versus 1754 s with 1 and 1, a 3.8x speed-up (20-core machine, 15 GB RAM).
 - **Parsing is the bottleneck, and parallel parsing fixes most of it:** going from 1 to 16 parse workers cut parse time from about 1340 s to about 320 s (about 4.2x). Download workers barely matter on this dataset (1 vs 64 download workers saved about 20 s), because the PDF bytes arrive inside the streamed rows.
+- **3.9x faster than LangChain on the same 6000 local PDFs:** 389 s with 16 parse workers versus 1512 s for LangChain's `PyPDFLoader` (7.9 ms versus 30.2 ms per page). Both use pypdf, so the speed-up comes from parallel parsing; the engine also cleans the text, extracts metadata and removes duplicates, which LangChain does not.
 - **Same output no matter how it is tuned:** all four worker settings (1/1, 64/1, 1/16, 64/16) read the same 5101 rows and returned exactly the same result: 5000 documents kept, 94 skipped as parse failures (78 encrypted PDFs, 10 rows detected as plain text with no parser yet, 6 AES-encrypted PDFs) and 7 removed as duplicates.
 - **Fast resume (with `cache_dir`):** documents already processed are loaded back from the cache instead of being parsed again, and their saved MinHash signatures are reused for duplicate checking, which made loading 1000 cached documents about 15x faster (0.10 s versus 1.49 s).
 - **Robust by design:** a run never stops because of one document; only a failure to write to disk (for example a full disk) stops it, and with a `cache_dir` the progress saved after the last batch lets the next run continue.
@@ -331,14 +332,40 @@ The expected speed-up on 16 cores was about 10-14x; the measured parse speed-up 
 - **Moving data between processes.** Each document's result (its full text and metadata) is sent back from the worker process to the main process.
 - **Parse workers are idle during downloads** (about 127 s per run), which is not counted in parse time but adds to the total.
 
+**Comparison with LangChain `PyPDFLoader` (6000 local PDFs)**
+
+- The question: how does the engine compare with a standard loader on the same documents?
+- Documents: the first 6000 rows of `pixparse/pdfa-eng-wds` (split `train`), saved once as 6000 PDF files (2.7 GB) in a local folder, so network speed does not affect either side. Both tools read the same folder.
+- LangChain: `benchmarks/langchain/langchain.py` (run with `benchmarks/langchain/run_langchain.sh <folder>`) loads each file with `PyPDFLoader` (langchain-community 0.4.2) in one process, because `PyPDFLoader` has no parallelism of its own. A file that fails is counted and skipped. Log: `logs/log_langchain.txt`.
+- The engine: `python -m doc_ingest --size 6000 --input_path <folder> --parse_workers 16`, caching off, all other settings default. Log: `logs/log_local_6000_parse16.txt`.
+- Both use the same parser, pypdf 6.16, on the same machine as above. Each was run once.
+
+| | LangChain `PyPDFLoader` | DocIngestEngine |
+|---|---|---|
+| Parse workers | 1 | 16 |
+| Total time | 1512 s (25.2 min) | **389 s (6.5 min)**, 3.9x faster |
+| Documents returned | 5959 (as 50131 per-page Documents) | 5890 |
+| Pages | 50131 loaded | 49109 parsed |
+| Pages per second | 33.2 | **126.3** |
+| Time per page | 30.2 ms | **7.9 ms** |
+| Failed / skipped | 41 failed | 101 skipped, 9 duplicates removed |
+
+- **The speed-up comes from parallel parsing, not from a faster parser.** Both sides use pypdf. On one core the two are about the same: LangChain took 30.2 ms per page, and the engine's 1/1 streaming run above works out to about 31.6 ms per page (1336 s of parse time over the 42254 pages of those 5000 documents, counted in a later run). A 1-worker run on this local set was not done.
+- **The engine's time includes more work**: text cleanup, metadata extraction, duplicate checking, and copying each raw file to its temporary folder.
+- **Why the documents differ:**
+  - The engine skips every encrypted PDF on purpose (93 files). pypdf can open many of them with an empty password, and LangChain does, so it returned about 54 documents the engine skipped. That also explains most of LangChain's roughly 1000 extra pages.
+  - AES-encrypted PDFs need the `cryptography` package, which is not installed: LangChain failed on 39 of them, the engine on 7 (its own encryption check had already skipped the rest).
+  - On 2 broken files (`LimitReachedError`, `KeyError: '/DescendantFonts'`) LangChain lost the whole file. The engine catches page extraction errors page by page and kept both documents.
+  - Only the engine removes duplicates (9) and empty documents (1); LangChain returns them as ordinary documents.
+
 **Resume speed (separate micro-benchmark)**
 
 - Loading 1000 cached documents into the duplicate checker took 0.10 s when their saved MinHash signatures were reused, versus 1.49 s when the signatures were computed again from the text, about 15x faster. This is the work a resumed run does at startup for every cached document.
 
 **Not measured yet**
 
-- Pages per second (the page count is not yet part of the summary), and peak memory use (the returned list holds every document's full text, which matters at 50k documents and more).
-- A plain pypdf loop on the same documents (to show the pipeline's own overhead), a larger run (50k), a second PDF parser (pypdfium2), and other loaders (LangChain, LlamaIndex, unstructured) on the same set. These are the next steps of the benchmark plan in `BENCHMARK_PLAN.md`.
+- Peak memory use (the returned list holds every document's full text, which matters at 50k documents and more).
+- A plain pypdf loop on the same documents (to show the pipeline's own overhead), a larger run (50k), a second PDF parser (pypdfium2), and other loaders (LlamaIndex, unstructured) on the same set. These are the next steps of the benchmark plan in `BENCHMARK_PLAN.md`.
 - Cheap experiments that follow from the results: a larger `--max_batch_rows` (for example 1024) to reduce the "wait for the slowest document" pauses, and overlapping the download of the next batch with parsing of the current one.
 
 ## 8. Repo Structure
@@ -354,6 +381,8 @@ DocIngestEngine/
 ├── .gitignore              keeps .env, config.py, logs/ and Python caches out of git
 ├── .claude/skills/         a git-commit helper used while developing with Claude Code
 ├── .vscode/settings.json   editor settings
+├── benchmarks/
+│   └── langchain/          LangChain PyPDFLoader baseline: langchain.py and run_langchain.sh (benchmark only, not a dependency)
 ├── src/
 │   └── doc_ingest/         the package
 │       ├── __init__.py         public API: ingest_documents, IngestResult, IngestError, Document, DownloadSettings, ProcessSettings
@@ -455,7 +484,7 @@ Notes:
 - **Count unsupported types correctly** once formats are being added: skip types without a registered parser before downloading them.
 - **A batch-by-batch API (`lazy_ingest`)**, planned after the RAG project that will use this library: instead of one list at the end, return one `IngestResult` per batch (that batch's kept documents and that batch's summary, for example 498 documents from a 500-row batch), saving progress before each batch is handed over so stopping early is safe. It will be a separate function next to `ingest_documents`, leaving the current API unchanged.
 - **Windows support for the parse time limit**, or at least a clear warning when it cannot be enforced.
-- **Benchmark plan** (`BENCHMARK_PLAN.md`): add page counts (pages per second) and peak memory to the measurements, benchmark a plain pypdf loop on the same documents to show the pipeline's overhead, run at 50k documents with the best setting (memory, disk, resume after an interruption, Hugging Face throttling), make the PDF parser selectable and compare pypdf with pypdfium2 (speed and text quality), and compare with other loaders (LangChain `PyPDFLoader`, LlamaIndex `SimpleDirectoryReader`, `unstructured`) on the same 5k set.
+- **Benchmark plan** (`BENCHMARK_PLAN.md`): add peak memory to the measurements, benchmark a plain pypdf loop on the same documents to show the pipeline's overhead, run at 50k documents with the best setting (memory, disk, resume after an interruption, Hugging Face throttling), make the PDF parser selectable and compare pypdf with pypdfium2 (speed and text quality), and compare with other loaders (LlamaIndex `SimpleDirectoryReader`, `unstructured`) on the same set, as was done for LangChain `PyPDFLoader`.
 - **Performance experiments** suggested by the results: a larger `max_batch_rows` (for example 1024) to reduce the waiting at the end of each batch, and overlapping the download of the next batch with the parsing of the current one.
 - **A RAG project built on top of this library**, where cleaned, deduplicated documents with source metadata feed chunking, embedding and retrieval. Its results will show which ingestion settings (for example the near-duplicate threshold) matter for answer quality.
 
