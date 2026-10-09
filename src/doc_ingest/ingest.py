@@ -356,7 +356,7 @@ class IngestEngine:
 		raw_dir = None
 		processed_dir = None
 		if self.cache_dir is not None:
-			dataset_folder = os.path.join(self.cache_dir, self.db_config.name, "data")
+			dataset_folder = os.path.join(self.cache_dir, f"data_{self.db_config.name}")
 			raw_dir = os.path.join(dataset_folder, "raw")
 			processed_dir = os.path.join(dataset_folder, "processed")
 

@@ -16,12 +16,12 @@ def get_processed_document_path(storage_path: str, dataset_name: str, doc_id: st
 		doc_id - id of the processed document.
 	Output:
 		Path of the document's cached JSON file, for example
-		"~/.cache/doc_ingest/<dataset_name>/data/processed/<doc_id>.json".
+		"~/.cache/doc_ingest/data_<dataset_name>/processed/<doc_id>.json".
 	What it does:
 		Builds the path where a processed document is cached.
 	"""
 	processed_document_file_name = f"{doc_id}.json"
-	processed_document_path = os.path.join(f"{storage_path}/{dataset_name}/data/processed/", processed_document_file_name)
+	processed_document_path = os.path.join(f"{storage_path}/data_{dataset_name}/processed/", processed_document_file_name)
 	return processed_document_path
 
 

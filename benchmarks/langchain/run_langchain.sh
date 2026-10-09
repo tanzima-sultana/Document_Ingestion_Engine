@@ -15,7 +15,7 @@ source ~/pyenv/bin/activate
 export PYTHONPATH="$REPO_ROOT/src"
 
 # Same PDFs doc_ingest downloaded; run.sh deletes outputs/, so copy them elsewhere for repeat runs
-INPUT_PATH="${1:-$REPO_ROOT/outputs/pdfa-eng-wds_6b87b8a4/data/raw}"
+INPUT_PATH="${1:-$REPO_ROOT/outputs/data_pdfa-eng-wds_6b87b8a4/raw}"
 
 mkdir -p logs
 LOG="logs/log_langchain.txt"

@@ -53,7 +53,7 @@ class TestIngestDocuments(unittest.TestCase):
 	def read_progress(self):
 		"""Reads the dataset's progress.json."""
 		dataset_name = get_dataset_name(self.input_folder)
-		progress_path = os.path.join(self.output_path, dataset_name, "progress.json")
+		progress_path = os.path.join(self.output_path, f"data_{dataset_name}", "progress.json")
 		with open(progress_path, encoding="utf-8") as progress_file:
 			return json.load(progress_file)
 

@@ -354,14 +354,14 @@ class RawDataFetcher:
 			doc_type - its document type from get_document_type.
 		Output: path of the saved raw file.
 		What it does: writes the bytes to
-			"<storage_path>/<dataset name>/data/raw/<doc_id>.<doc_type>",
+			"<storage_path>/data_<dataset name>/raw/<doc_id>.<doc_type>",
 			creating the raw/ folder if needed. The document type is used as
 			the extension rather than the dataset's extension, because a
 			JSONL or Hugging Face dataset holds documents of another type
 			(e.g. a PDF inside a JSONL record is saved as ".pdf").
 		"""
 		raw_file_name = f"{doc_id}.{doc_type}"
-		raw_folder_path = f"{self.storage_path}/{self.dataset_config.name}/data/raw/"
+		raw_folder_path = f"{self.storage_path}/data_{self.dataset_config.name}/raw/"
 		raw_file_path = os.path.join(raw_folder_path, raw_file_name)
 
 		os.makedirs(raw_folder_path, exist_ok=True)

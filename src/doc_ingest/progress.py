@@ -42,12 +42,12 @@ def get_progress_path(storage_path: str, dataset_name: str) -> str:
 		dataset_name - name of the dataset (from get_dataset_name).
 	Output:
 		Path of this dataset's progress file, for example
-		"~/.cache/doc_ingest/docx-corpus/progress.json".
+		"~/.cache/doc_ingest/data_docx-corpus/progress.json".
 	What it does:
 		Keeps the progress file next to the dataset's cached documents, so
 		the progress always describes the cache in the same storage folder.
 	"""
-	progress_path = os.path.join(f"{storage_path}/{dataset_name}/", f"progress.json")
+	progress_path = os.path.join(f"{storage_path}/data_{dataset_name}/", f"progress.json")
 	return progress_path
 
 
