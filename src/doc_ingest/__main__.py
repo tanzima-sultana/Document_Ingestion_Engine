@@ -2,12 +2,15 @@
 __main__.py
 
 Command line entry point: python -m doc_ingest --size N --input_path PATH
+or python -m doc_ingest --config_path config.yaml (run.sh does this).
 """
 
 import argparse
 import logging
 import os
 import sys
+
+import yaml
 
 from doc_ingest.ingest import ingest_documents
 from doc_ingest.error import IngestError
@@ -22,34 +25,97 @@ from doc_ingest.settings import DownloadSettings
 from doc_ingest.settings import ProcessSettings
 from doc_ingest.settings import ParserSettings
 
+# Keys a config file may set: top-level keys, then each settings group and its keys.
+# Every key has the same name as its command line option.
+CONFIG_TOP_LEVEL_KEYS = ["size", "input_path"]
+CONFIG_GROUP_KEYS = {
+	"download_settings": ["download_workers", "max_batch_rows", "hugging_face_split"],
+	"process_settings": ["parse_workers", "dedup_threshold"],
+	"parser_settings": ["pdf_parser", "parse_timeout_seconds"],
+}
+
+
+def load_config_file(config_path: str) -> dict:
+	"""
+	Input: config_path - path of a YAML config file (see config.yaml at the repo root).
+	Output: a flat dict of option name -> value, e.g. {"size": 5000, "download_workers": 64}.
+	What it does: reads the file and checks that every key is a known option, in its right group.
+		Raises ValueError with a readable message if the file is missing, is not valid YAML, or has an unknown key.
+	"""
+	try:
+		with open(config_path, encoding="utf-8") as config_file:
+			config_data = yaml.safe_load(config_file)
+	except OSError as read_error:
+		raise ValueError("config file could not be read: " + repr(config_path) + " (" + str(read_error) + ")")
+	except yaml.YAMLError as yaml_error:
+		raise ValueError("config file is not valid YAML: " + repr(config_path) + " (" + str(yaml_error) + ")")
+
+	# An empty file sets nothing
+	if config_data is None:
+		return {}
+	if not isinstance(config_data, dict):
+		raise ValueError("config file must hold key: value pairs: " + repr(config_path))
+
+	config_values = {}
+	for key, value in config_data.items():
+		if key in CONFIG_TOP_LEVEL_KEYS:
+			config_values[key] = value
+			continue
+
+		if key not in CONFIG_GROUP_KEYS:
+			raise ValueError("unknown key in config file: " + repr(key))
+
+		# A group with nothing under it sets nothing
+		if value is None:
+			continue
+		if not isinstance(value, dict):
+			raise ValueError("config key " + repr(key) + " must hold key: value pairs")
+
+		for setting_name, setting_value in value.items():
+			if setting_name not in CONFIG_GROUP_KEYS[key]:
+				raise ValueError("unknown key in config file: " + repr(key + "." + str(setting_name)))
+			config_values[setting_name] = setting_value
+
+	return config_values
+
 
 def parse_args(argument_list):
 	"""
 	Input:
 		argument_list - list of command line strings, usually sys.argv[1:].
 	Output:
-		argparse.Namespace with size, input_path, and every download,
-		process and parser setting.
+		argparse.Namespace with config_path, size, input_path, and every
+		download, process and parser setting.
 	What it does:
-		Reads the options run.sh passes in. Only size and input_path are
-		required; every setting is optional and shown in its own --help
-		group. Stops with an error message if a required option is missing
-		or a number option is not a number.
+		Reads the command line options. With --config_path, the values in
+		that config file are used first; an option typed on the command
+		line still wins, and anything set in neither uses the library
+		default. size and input_path must be set in one of the two; every
+		setting is optional and shown in its own --help group. Stops with
+		an error message if size or input_path is missing, the config file
+		is bad, or a number option is not a number.
 	"""
 	argument_parser = argparse.ArgumentParser(
 		description="Ingest documents into clean, deduplicated JSON."
 	)
 	argument_parser.add_argument(
+		"--config_path",
+		type=str,
+		default=None,
+		help="YAML file with the options below; options typed on the command line override it.",
+	)
+	# Not required=True here: size and input_path may come from the config file instead (checked below)
+	argument_parser.add_argument(
 		"--size",
 		type=int,
-		required=True,
-		help="Maximum number of documents to process.",
+		default=None,
+		help="Maximum number of documents to process (required, here or in the config file).",
 	)
 	argument_parser.add_argument(
 		"--input_path",
 		type=str,
-		required=True,
-		help="Local path, or Hugging Face dataset name (or its page URL), to read documents from.",
+		default=None,
+		help="Local path, or Hugging Face dataset name (or its page URL), to read documents from (required, here or in the config file).",
 	)
 
 	download_group = argument_parser.add_argument_group("download settings")
@@ -100,7 +166,28 @@ def parse_args(argument_list):
 		default=DEFAULT_PARSE_TIMEOUT_SECONDS,
 		help="Longest time one document may take to parse before it is skipped (default: %(default)s).",
 	)
+
+	# Read --config_path on its own first, so the config file's values can
+	# become the defaults before the full command line is read
+	config_path_parser = argparse.ArgumentParser(add_help=False)
+	config_path_parser.add_argument("--config_path", type=str, default=None)
+	# parse_known_args returns (known options, the other options); only the known ones are needed here
+	config_path_arguments = config_path_parser.parse_known_args(argument_list)[0]
+
+	if config_path_arguments.config_path is not None:
+		try:
+			config_values = load_config_file(config_path_arguments.config_path)
+		except ValueError as config_error:
+			argument_parser.error(str(config_error))
+		argument_parser.set_defaults(**config_values)
+
 	parsed_arguments = argument_parser.parse_args(argument_list)
+
+	if parsed_arguments.size is None:
+		argument_parser.error("size is required: pass --size or set size in the config file")
+	if parsed_arguments.input_path is None:
+		argument_parser.error("input_path is required: pass --input_path or set input_path in the config file")
+
 	return parsed_arguments
 
 
@@ -133,6 +220,8 @@ def main():
 	)
 
 	print("Starting document ingestion")
+	if args.config_path is not None:
+		print("  config_path : " + args.config_path)
 	print("  size        : " + str(size))
 	print("  input_path  : " + input_path)
 	print("  download_settings : " + str(download_settings))
