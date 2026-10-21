@@ -76,14 +76,14 @@ class TestPDF(unittest.TestCase):
 	def test_parse_document_returns_none_on_failure(self):
 		"""parse_document returns (doc_id, None) instead of raising."""
 		raw_data = self.make_raw_data("fake.pdf", b"this is not a pdf")
-		doc_id, document = parse_document(raw_data)
+		doc_id, document, parse_seconds = parse_document(raw_data)
 		self.assertEqual(doc_id, "doc1")
 		self.assertIsNone(document)
 
 	def test_parse_document_unknown_type(self):
 		"""A type with no parser returns None."""
 		raw_path = helpers.write_file(self.root, "a.docx", b"PK")
-		doc_id, document = parse_document(RawData("doc2", "docx", raw_path, "a.docx"))
+		doc_id, document, parse_seconds = parse_document(RawData("doc2", "docx", raw_path, "a.docx"))
 		self.assertIsNone(document)
 
 	def test_pdf_properties(self):
@@ -174,7 +174,7 @@ class TestPyPdfium2(unittest.TestCase):
 	def test_parse_document_uses_chosen_parser(self):
 		"""parse_document uses the PDF parser chosen in ParserSettings."""
 		raw_data = self.make_raw_data("a.pdf", helpers.make_pdf([["hello"]], {}))
-		doc_id, document = parse_document(raw_data, parser_settings=ParserSettings(pdf_parser="pypdfium2"))
+		doc_id, document, parse_seconds = parse_document(raw_data, parser_settings=ParserSettings(pdf_parser="pypdfium2"))
 		self.assertEqual(document.metadata.parser, "pypdfium2")
 
 

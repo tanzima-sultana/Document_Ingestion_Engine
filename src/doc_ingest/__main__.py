@@ -6,6 +6,8 @@ or python -m doc_ingest --config_path config.yaml (run.sh does this).
 """
 
 import argparse
+import datetime
+import json
 import logging
 import os
 import sys
@@ -14,6 +16,7 @@ import yaml
 
 from doc_ingest.ingest import ingest_documents
 from doc_ingest.error import IngestError
+from doc_ingest.summary import summary_to_dict
 from doc_ingest.settings import DEFAULT_DEDUP_THRESHOLD
 from doc_ingest.settings import DEFAULT_DOWNLOAD_WORKERS
 from doc_ingest.settings import DEFAULT_HUGGING_FACE_SPLIT
@@ -191,6 +194,21 @@ def parse_args(argument_list):
 	return parsed_arguments
 
 
+def save_summary_json(summary) -> str:
+	"""
+	Input: summary - the run's Summary.
+	Output: the path of the saved file, logs/summary_<date>_<time>.json in the current folder.
+	What it does: writes summary_to_dict(summary) as indented JSON, creating logs/ if needed.
+	"""
+	run_time = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+	summary_path = os.path.join("logs", "summary_" + run_time + ".json")
+	os.makedirs("logs", exist_ok=True)
+
+	with open(summary_path, "w", encoding="utf-8") as summary_file:
+		json.dump(summary_to_dict(summary), summary_file, indent=2)
+	return summary_path
+
+
 def main():
 	"""
 	Input: none (reads sys.argv). Output: none; exits the process (0 on success, 1 on an IngestError).
@@ -247,6 +265,9 @@ def main():
 		sys.exit(1)
 
 	print("Document ingestion finished")
+
+	summary_path = save_summary_json(ingest_result.summary)
+	print("Summary saved to " + summary_path)
 
 	# huggingface `datasets`/fsspec leaves a background thread alive after
 	# streaming a dataset, which crashes normal interpreter shutdown with

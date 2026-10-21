@@ -91,7 +91,8 @@ def parse_document(raw_data: RawData, parser_settings: ParserSettings | None = N
 	Input: raw_data - the document to parse (doc_id, doc_type and
 		raw_path of its saved raw file); parser_settings - which library
 		to use per type and the time limit per document (None: the defaults).
-	Output: (doc_id, document). On failure, document is None.
+	Output: (doc_id, document, parse_seconds). On failure, document is None.
+		parse_seconds is the time this worker spent on the document, failed or not.
 	What it does: picks the parser for raw_data.doc_type (and the chosen library) and parses the
 		raw file, in a parse worker process. Parse errors, and parsing
 		longer than parser_settings.parse_timeout_seconds, are not raised; the reason is
@@ -100,6 +101,7 @@ def parse_document(raw_data: RawData, parser_settings: ParserSettings | None = N
 	if parser_settings is None:
 		parser_settings = ParserSettings()
 
+	parse_start = time.perf_counter()
 	timeout_is_set = start_parse_timeout(parser_settings.parse_timeout_seconds)
 	try:
 		parser_cls = get_parser(raw_data.doc_type, parser_settings)
@@ -107,12 +109,14 @@ def parse_document(raw_data: RawData, parser_settings: ParserSettings | None = N
 		document = parser.parse(raw_data)
 	except Exception as error:
 		logger.warning("Parse failed for document %s: %s", raw_data.doc_id, describe_error(error))
-		return raw_data.doc_id, None
+		parse_seconds = time.perf_counter() - parse_start
+		return raw_data.doc_id, None, parse_seconds
 	finally:
 		if timeout_is_set:
 			signal.alarm(0)
 
-	return raw_data.doc_id, document
+	parse_seconds = time.perf_counter() - parse_start
+	return raw_data.doc_id, document, parse_seconds
 
 
 def start_parse_timeout(parse_timeout_seconds: int) -> bool:

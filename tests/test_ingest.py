@@ -54,10 +54,11 @@ class TestIngestDocuments(unittest.TestCase):
 		sources.sort()
 		self.assertEqual(sources, ["a_report.pdf", "c_weather.pdf", "d_memo.pdf"])
 
-		self.assertIn("Requested 20 document(s), returned 3.", printed_output)
-		self.assertIn("Skipped 2 document(s) that failed in parsing.", printed_output)
-		self.assertIn("Skipped 1 document(s) with no text.", printed_output)
-		self.assertIn("Skipped 1 document(s) due to duplicate detection.", printed_output)
+		self.assertIn("requested_size: 20", printed_output)
+		self.assertIn("documents_returned: 3", printed_output)
+		self.assertIn("parse_failed: 2", printed_output)
+		self.assertIn("no_text: 1", printed_output)
+		self.assertIn("duplicates: 1", printed_output)
 
 	def list_temporary_ingest_folders(self):
 		"""Returns the names of doc_ingest's temporary folders in the system temp folder."""
@@ -77,7 +78,7 @@ class TestIngestDocuments(unittest.TestCase):
 
 		second_documents, second_output = self.run_ingest(20)
 		self.assertEqual(len(second_documents), 3)
-		self.assertIn("Skipped 1 document(s) due to duplicate detection.", second_output)
+		self.assertIn("duplicates: 1", second_output)
 		self.assertEqual(self.list_temporary_ingest_folders(), temporary_folders_before)
 
 	def test_temporary_folder_removed_after_failed_run(self):

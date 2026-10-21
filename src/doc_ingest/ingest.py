@@ -65,6 +65,9 @@ class IngestEngine:
 
 		self.summary = Summary()
 		self.summary.requested_size = size
+		self.summary.download_settings = download_settings
+		self.summary.process_settings = process_settings
+		self.summary.parser_settings = parser_settings
 
 		# Set in run(), once the inputs and settings pass validation
 		self.deduplicator = None
@@ -80,6 +83,7 @@ class IngestEngine:
 		# 0. Validate inputs before any work is done.
 		# A Hugging Face dataset page URL is turned into the dataset name first.
 		self.input_path = dataset_hf.normalize_input_path(self.input_path)
+		self.summary.dataset = self.input_path
 		validate.validate_inputs(self.size, self.input_path, self.download_settings, self.process_settings, self.parser_settings)
 		self.deduplicator = Deduplicator(threshold=self.process_settings.dedup_threshold)
 
@@ -107,7 +111,7 @@ class IngestEngine:
 				raw_items = raw_batch.raw_items
 				self.source_exhausted = raw_batch.source_exhausted
 
-				self.summary.rows += raw_batch.rows_read
+				self.summary.files_read += raw_batch.rows_read
 				self.summary.downloaded += raw_batch.downloaded
 				self.summary.download_failed += raw_batch.rows_read - raw_batch.downloaded
 				self.summary.prepare_failed += raw_batch.prepare_failed
@@ -147,7 +151,7 @@ class IngestEngine:
 	def parse_batch(self, parse_items: list) -> list:
 		"""
 		Input: parse_items - the RawData items to parse.
-		Output: a (doc_id, Document or None) per item, in parse_items order.
+		Output: a (doc_id, Document or None, parse_seconds or None) per item, in parse_items order.
 		What it does: parses all items in parallel in self.parse_executor. If a worker process dies, the pool is replaced and the unfinished items are parsed again one at a time, so only the item that kills a worker is skipped (None).
 		"""
 		futures = []
@@ -163,10 +167,10 @@ class IngestEngine:
 				result = futures[item_index].result()
 			except concurrent.futures.process.BrokenProcessPool:
 				unfinished_indexes.append(item_index)
-				result = (raw_data.doc_id, None)
+				result = (raw_data.doc_id, None, None)
 			except Exception as error:
 				logger.warning("Parse failed for document %s: %s", raw_data.doc_id, describe_error(error))
-				result = (raw_data.doc_id, None)
+				result = (raw_data.doc_id, None, None)
 			results.append(result)
 
 		if len(unfinished_indexes) == 0:
@@ -185,31 +189,35 @@ class IngestEngine:
 				logger.warning("Parse failed for document %s: its parse worker process died", raw_data.doc_id)
 				self.parse_executor.shutdown()
 				self.create_parse_executor()
-				result = (raw_data.doc_id, None)
+				result = (raw_data.doc_id, None, None)
 			except Exception as error:
 				logger.warning("Parse failed for document %s: %s", raw_data.doc_id, describe_error(error))
-				result = (raw_data.doc_id, None)
+				result = (raw_data.doc_id, None, None)
 			results[item_index] = result
 
 		return results
 
 	def process_parsed_documents(self, parsed_docs: list) -> None:
 		"""
-		Input: parsed_docs - (doc_id, Document or None) pairs from parse_batch.
+		Input: parsed_docs - (doc_id, Document or None, parse_seconds or None) from parse_batch.
 		Output: None. Adds kept documents to documents.
-		What it does: skips failed, empty and duplicate documents and keeps the rest in memory.
+		What it does: records the content and parse time of every parsed document, then skips failed, empty and duplicate documents and keeps the rest in memory.
 		"""
-		for doc_id, doc in parsed_docs:
+		for doc_id, doc, parse_seconds in parsed_docs:
 
 			# Skipped
 			if doc is None:
 				logger.warning("Skipping document %s: parse failed", doc_id)
 				self.summary.skipped += 1
-				self.summary.parse_error += 1
+				self.summary.parse_failed += 1
 				continue
 
+			self.summary.document_parse_seconds.append(parse_seconds)
+			self.summary.characters += len(doc.text)
 			if doc.metadata.page_count is not None:
-				self.summary.pages_parsed += doc.metadata.page_count
+				self.summary.pages += doc.metadata.page_count
+			if doc.type.value not in self.summary.doc_types:
+				self.summary.doc_types.append(doc.type.value)
 
 			try:
 				# No text, e.g. a scanned PDF
@@ -221,16 +229,15 @@ class IngestEngine:
 
 				# Duplicate
 				if not self.deduplicator.add_if_new(doc):
-					self.summary.duplicate += 1
+					self.summary.duplicates += 1
 					continue
 			except Exception as error:
 				logger.warning("Skipping document %s: duplicate check failed: %s", doc_id, describe_error(error))
 				self.summary.skipped += 1
-				self.summary.keep_error += 1
+				self.summary.duplicate_check_failed += 1
 				continue
 
 			self.documents[doc_id] = doc
-			self.summary.processed += 1
 
 	def finish(self) -> IngestResult:
 		"""
@@ -238,7 +245,7 @@ class IngestEngine:
 		Output: an IngestResult with the collected Documents and the run's Summary.
 		What it does: fills in the final summary numbers and logs the run summary.
 		"""
-		self.summary.returned_size = len(self.documents)
+		self.summary.documents_returned = len(self.documents)
 		self.summary.source_exhausted = self.source_exhausted
 		self.summary.batches = self.batch_number
 		self.summary.total_seconds = time.perf_counter() - self.run_start
