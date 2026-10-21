@@ -153,7 +153,7 @@ class IngestEngine:
 		"""
 		futures = []
 		for raw_data in parse_items:
-			future = self.parse_executor.submit(parser.parse_document, raw_data, self.process_settings.parse_timeout_seconds, self.parser_settings)
+			future = self.parse_executor.submit(parser.parse_document, raw_data, self.parser_settings)
 			futures.append(future)
 
 		results = []
@@ -180,7 +180,7 @@ class IngestEngine:
 		for item_index in unfinished_indexes:
 			raw_data = parse_items[item_index]
 			try:
-				future = self.parse_executor.submit(parser.parse_document, raw_data, self.process_settings.parse_timeout_seconds, self.parser_settings)
+				future = self.parse_executor.submit(parser.parse_document, raw_data, self.parser_settings)
 				result = future.result()
 			except concurrent.futures.process.BrokenProcessPool:
 				logger.warning("Parse failed for document %s: its parse worker process died", raw_data.doc_id)

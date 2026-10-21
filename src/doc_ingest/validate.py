@@ -36,7 +36,7 @@ def validate_inputs(size: int, input_path: str, download_settings: DownloadSetti
 	# (a parse_timeout_seconds of 0 would turn the time limit off)
 	validate_setting_is_at_least_one("download_workers", download_settings.download_workers)
 	validate_setting_is_at_least_one("max_batch_rows", download_settings.max_batch_rows)
-	validate_setting_is_at_least_one("parse_timeout_seconds", process_settings.parse_timeout_seconds)
+	validate_setting_is_at_least_one("parse_timeout_seconds", parser_settings.parse_timeout_seconds)
 
 	# 4. parse_workers must be None (one per CPU core) or a whole number of at least 1
 	if process_settings.parse_workers is not None:

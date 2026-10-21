@@ -80,12 +80,6 @@ def parse_args(argument_list):
 		help="Number of documents parsed at the same time (default: number of CPU cores).",
 	)
 	process_group.add_argument(
-		"--parse_timeout_seconds",
-		type=int,
-		default=DEFAULT_PARSE_TIMEOUT_SECONDS,
-		help="Longest time one document may take to parse before it is skipped (default: %(default)s).",
-	)
-	process_group.add_argument(
 		"--dedup_threshold",
 		type=float,
 		default=DEFAULT_DEDUP_THRESHOLD,
@@ -99,6 +93,12 @@ def parse_args(argument_list):
 		choices=PDF_PARSER_NAMES,
 		default=DEFAULT_PDF_PARSER,
 		help="Library that parses PDFs; pypdfium2 needs pip install pypdfium2 (default: %(default)s).",
+	)
+	parser_group.add_argument(
+		"--parse_timeout_seconds",
+		type=int,
+		default=DEFAULT_PARSE_TIMEOUT_SECONDS,
+		help="Longest time one document may take to parse before it is skipped (default: %(default)s).",
 	)
 	parsed_arguments = argument_parser.parse_args(argument_list)
 	return parsed_arguments
@@ -125,11 +125,11 @@ def main():
 	)
 	process_settings = ProcessSettings(
 		parse_workers=args.parse_workers,
-		parse_timeout_seconds=args.parse_timeout_seconds,
 		dedup_threshold=args.dedup_threshold,
 	)
 	parser_settings = ParserSettings(
 		pdf_parser=args.pdf_parser,
+		parse_timeout_seconds=args.parse_timeout_seconds,
 	)
 
 	print("Starting document ingestion")

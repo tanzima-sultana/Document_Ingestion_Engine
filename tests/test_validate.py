@@ -66,11 +66,11 @@ class TestValidateInputs(unittest.TestCase):
 		with self.assertRaises(IngestError):
 			self.validate_settings(DownloadSettings(), ProcessSettings(parse_workers=0))
 		with self.assertRaises(IngestError):
-			self.validate_settings(DownloadSettings(), ProcessSettings(parse_timeout_seconds=0))
+			validate.validate_inputs(5, self.input_folder, DownloadSettings(), ProcessSettings(), ParserSettings(parse_timeout_seconds=0))
 		with self.assertRaises(TypeError):
 			self.validate_settings(DownloadSettings(download_workers=True), ProcessSettings())
 		with self.assertRaises(TypeError):
-			self.validate_settings(DownloadSettings(), ProcessSettings(parse_timeout_seconds=1.5))
+			validate.validate_inputs(5, self.input_folder, DownloadSettings(), ProcessSettings(), ParserSettings(parse_timeout_seconds=1.5))
 
 	def test_bad_hugging_face_split(self):
 		"""The split must be non-empty text."""

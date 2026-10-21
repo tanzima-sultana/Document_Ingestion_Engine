@@ -44,17 +44,18 @@ class DownloadSettings:
 class ProcessSettings:
 	"""
 	How raw files become kept documents: parse_workers - parse processes (None: one per CPU core);
-	parse_timeout_seconds - time limit per document; dedup_threshold - near-duplicate similarity.
+	dedup_threshold - near-duplicate similarity.
 	"""
 	parse_workers: int | None = None
-	parse_timeout_seconds: int = DEFAULT_PARSE_TIMEOUT_SECONDS
 	dedup_threshold: float = DEFAULT_DEDUP_THRESHOLD
 
 
 @dataclasses.dataclass
 class ParserSettings:
 	"""
-	Which library parses each document type: pdf_parser - "pypdf" (default) or "pypdfium2".
-	Every choice produces the same Document format; only the extracted text can differ.
+	How each document is parsed: pdf_parser - "pypdf" (default) or "pypdfium2";
+	parse_timeout_seconds - time limit per document.
+	Every pdf_parser choice produces the same Document format; only the extracted text can differ.
 	"""
 	pdf_parser: str = DEFAULT_PDF_PARSER
+	parse_timeout_seconds: int = DEFAULT_PARSE_TIMEOUT_SECONDS

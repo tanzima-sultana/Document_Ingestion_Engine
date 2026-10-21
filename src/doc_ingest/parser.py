@@ -23,7 +23,6 @@ import time
 from doc_ingest.schema import Document
 from doc_ingest.raw_data import RawData
 from doc_ingest.error import describe_error
-from doc_ingest.settings import DEFAULT_PARSE_TIMEOUT_SECONDS
 from doc_ingest.settings import ParserSettings
 
 logger = logging.getLogger(__name__)
@@ -87,22 +86,21 @@ def get_parser(doc_type: str, parser_settings: ParserSettings) -> type[Parser]:
 		)
 	return parsers_for_type[chosen_parser_name]
 
-def parse_document(raw_data: RawData, parse_timeout_seconds: int = DEFAULT_PARSE_TIMEOUT_SECONDS, parser_settings: ParserSettings | None = None) -> tuple:
+def parse_document(raw_data: RawData, parser_settings: ParserSettings | None = None) -> tuple:
 	"""
 	Input: raw_data - the document to parse (doc_id, doc_type and
-		raw_path of its saved raw file); parse_timeout_seconds - time limit
-		for this document; parser_settings - which library to use per type
-		(None: the defaults).
+		raw_path of its saved raw file); parser_settings - which library
+		to use per type and the time limit per document (None: the defaults).
 	Output: (doc_id, document). On failure, document is None.
 	What it does: picks the parser for raw_data.doc_type (and the chosen library) and parses the
 		raw file, in a parse worker process. Parse errors, and parsing
-		longer than parse_timeout_seconds, are not raised; the reason is
+		longer than parser_settings.parse_timeout_seconds, are not raised; the reason is
 		logged and the document is returned as None instead.
 	"""
 	if parser_settings is None:
 		parser_settings = ParserSettings()
 
-	timeout_is_set = start_parse_timeout(parse_timeout_seconds)
+	timeout_is_set = start_parse_timeout(parser_settings.parse_timeout_seconds)
 	try:
 		parser_cls = get_parser(raw_data.doc_type, parser_settings)
 		parser = parser_cls()
