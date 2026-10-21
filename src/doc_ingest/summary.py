@@ -2,7 +2,7 @@
 summary.py
 
 Counts and logs the end-of-run summary of doc processing: documents
-loaded, newly processed and skipped by reason, and document parse times.
+processed and skipped by reason, and document parse times.
 """
 
 import logging
@@ -22,7 +22,6 @@ class Summary:
 	# Rows and documents
 	rows: int = 0
 	downloaded: int = 0
-	loaded_from_cache: int = 0
 	processed: int = 0
 
 	# Skipped, by reason
@@ -32,7 +31,6 @@ class Summary:
 	parse_error: int = 0
 	no_text: int = 0
 	keep_error: int = 0
-	cache_missing: int = 0
 	skipped: int = 0
 	duplicate: int = 0
 
@@ -55,7 +53,6 @@ def print_run_summary(summary: Summary) -> None:
 	logger.info("Batches: %s", summary.batches)
 	logger.info("Raw rows %s have been consumed", summary.rows)
 	logger.info("Raw data %s have been downloaded", summary.downloaded)
-	logger.info("Documents %s have been loaded from cache", summary.loaded_from_cache)
 	logger.info("Documents %s have been successfully processed", summary.processed)
 	logger.info("Skipped %s row(s) that failed to download/decode.", summary.download_failed)
 	logger.info("Skipped %s document(s) with an unsupported type.", summary.unsupported_type)
@@ -63,7 +60,6 @@ def print_run_summary(summary: Summary) -> None:
 	logger.info("Skipped %s document(s) that failed in parsing.", summary.parse_error)
 	logger.info("Skipped %s document(s) with no text.", summary.no_text)
 	logger.info("Skipped %s document(s) that failed in duplicate check or saving.", summary.keep_error)
-	logger.info("Skipped %s cached document(s) missing or damaged on disk.", summary.cache_missing)
 	logger.info("Skipped %s document(s) in total.", summary.skipped)
 	logger.info("Skipped %s document(s) due to duplicate detection.", summary.duplicate)
 	logger.info("Total time: %.1fs (download %.1fs, parse %.1fs)", summary.total_seconds, summary.download_seconds, summary.parse_seconds)

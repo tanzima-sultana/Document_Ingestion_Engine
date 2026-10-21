@@ -1,6 +1,6 @@
 """
-Tests for raw_data.py: reading rows, per-document type, source path,
-counts in a batch, and resuming from a row count.
+Tests for raw_data.py: reading rows, per-document type, source path
+and counts in a batch.
 """
 
 import base64
@@ -25,11 +25,11 @@ class TestRawDataFetcher(unittest.TestCase):
 	def tearDown(self):
 		self.temporary_folder.cleanup()
 
-	def fetch_all(self, input_path, rows_to_skip):
+	def fetch_all(self, input_path):
 		"""Fetches one batch of up to 100 rows and returns it."""
 		config = get_dataset_config(input_path)
 		fetcher = RawDataFetcher(input_path, self.output_path, config, DownloadSettings(download_workers=4))
-		row_iterator = fetcher.get_iterator(rows_to_skip)
+		row_iterator = fetcher.get_iterator()
 		return fetcher.fetch_raw_batch(row_iterator, 100)
 
 	def test_mixed_folder(self):
@@ -38,7 +38,7 @@ class TestRawDataFetcher(unittest.TestCase):
 		pdf_path = helpers.write_file(folder, "a.pdf", helpers.make_report_pdf("a", 1))
 		helpers.write_file(folder, "b.md", b"# title")
 		helpers.write_file(folder, "c.xyz", b"junk")
-		batch = self.fetch_all(folder, 0)
+		batch = self.fetch_all(folder)
 
 		self.assertEqual(batch.rows_read, 2)
 		self.assertEqual(batch.downloaded, 2)
@@ -63,7 +63,7 @@ class TestRawDataFetcher(unittest.TestCase):
 		for record in records:
 			lines = lines + json.dumps(record) + "\n"
 		jsonl_path = helpers.write_file(self.root, "docs.jsonl", lines.encode("utf-8"))
-		batch = self.fetch_all(jsonl_path, 0)
+		batch = self.fetch_all(jsonl_path)
 
 		self.assertEqual(batch.rows_read, 3)
 		self.assertEqual(batch.downloaded, 2)
@@ -72,23 +72,12 @@ class TestRawDataFetcher(unittest.TestCase):
 		self.assertEqual(batch.raw_items[0].source_path, jsonl_path + "#0")
 		self.assertEqual(batch.raw_items[1].source_path, jsonl_path + "#1")
 
-	def test_resume_skips_rows(self):
-		"""Starting at row 2 skips two rows and keeps row numbers."""
-		lines = ""
-		for record_number in range(4):
-			lines = lines + json.dumps({"text": f"record number {record_number}"}) + "\n"
-		jsonl_path = helpers.write_file(self.root, "docs.jsonl", lines.encode("utf-8"))
-		batch = self.fetch_all(jsonl_path, 2)
-
-		self.assertEqual(batch.rows_read, 2)
-		self.assertEqual(batch.raw_items[0].source_path, jsonl_path + "#2")
-
 	def test_doc_id_from_bytes(self):
 		"""The same bytes give the same doc id."""
 		folder = os.path.join(self.root, "copies")
 		helpers.write_file(folder, "a.txt", b"same")
 		helpers.write_file(folder, "b.txt", b"same")
-		batch = self.fetch_all(folder, 0)
+		batch = self.fetch_all(folder)
 		self.assertEqual(batch.raw_items[0].doc_id, batch.raw_items[1].doc_id)
 
 

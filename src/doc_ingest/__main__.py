@@ -51,12 +51,6 @@ def parse_args(argument_list):
 		required=True,
 		help="Local path, or Hugging Face dataset name (or its page URL), to read documents from.",
 	)
-	argument_parser.add_argument(
-		"--cache_dir",
-		type=str,
-		default=None,
-		help="Folder to cache documents and progress in, so a later run can resume (default: caching off).",
-	)
 
 	download_group = argument_parser.add_argument_group("download settings")
 	download_group.add_argument(
@@ -124,7 +118,6 @@ def main():
 	args = parse_args(sys.argv[1:])
 	size = args.size
 	input_path = args.input_path
-	cache_dir = args.cache_dir
 	download_settings = DownloadSettings(
 		download_workers=args.download_workers,
 		max_batch_rows=args.max_batch_rows,
@@ -142,17 +135,13 @@ def main():
 	print("Starting document ingestion")
 	print("  size        : " + str(size))
 	print("  input_path  : " + input_path)
-	if cache_dir is None:
-		print("  cache_dir   : off")
-	else:
-		print("  cache_dir   : " + cache_dir)
 	print("  download_settings : " + str(download_settings))
 	print("  process_settings  : " + str(process_settings))
 	print("  parser_settings   : " + str(parser_settings))
 
 
 	# Ingestion. ingest_documents validates the inputs first.
-	# An IngestError (failed check or damaged progress file) prints a clean
+	# An IngestError (failed check) prints a clean
 	# message (no traceback) and stops the program. Any other error is a
 	# bug or a system problem and keeps its full traceback.
 	try:
@@ -162,7 +151,6 @@ def main():
 			download_settings=download_settings,
 			process_settings=process_settings,
 			parser_settings=parser_settings,
-			cache_dir=cache_dir,
 		)
 	except IngestError as ingestion_error:
 		sys.stdout.flush()

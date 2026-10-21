@@ -1,77 +1,39 @@
-import logging
 import os
-import json
 
 from doc_ingest.schema import Document
-from doc_ingest.error import describe_error
-
-logger = logging.getLogger(__name__)
 
 
 def get_processed_document_path(storage_path: str, dataset_name: str, doc_id: str) -> str:
 	"""
 	Input:
-		storage_path - the cache folder (cache_dir given to ingest_documents).
+		storage_path - the run's temporary storage folder.
 		dataset_name - name of the dataset (from get_dataset_name).
 		doc_id - id of the processed document.
 	Output:
-		Path of the document's cached JSON file, for example
-		"~/.cache/doc_ingest/data_<dataset_name>/processed/<doc_id>.json".
+		Path of the document's JSON file, for example
+		"<storage_path>/data_<dataset_name>/processed/<doc_id>.json".
 	What it does:
-		Builds the path where a processed document is cached.
+		Builds the path where a processed document is saved.
 	"""
 	processed_document_file_name = f"{doc_id}.json"
 	processed_document_path = os.path.join(f"{storage_path}/data_{dataset_name}/processed/", processed_document_file_name)
 	return processed_document_path
 
 
-def load_processed_document(storage_path: str, dataset_name: str, doc_id: str) -> Document | None:
-	"""
-	Input:
-		storage_path - the cache folder (cache_dir given to ingest_documents).
-		dataset_name - name of the dataset (from get_dataset_name).
-		doc_id - id of the processed document.
-	Output:
-		The cached Document, or None if no cached file exists for doc_id
-		or the file is damaged.
-	What it does:
-		Reads the document's cached JSON file and turns it into a Document.
-		Pydantic checks the file against the schema while reading it. If
-		the file cannot be read, is not valid UTF-8 JSON, or a field is
-		missing or has the wrong type, a message is printed and None is
-		returned, so one damaged file does not stop the run.
-	"""
-	processed_document_path = get_processed_document_path(storage_path, dataset_name, doc_id)
-	if not os.path.exists(processed_document_path):
-		return None
-
-	# pydantic.ValidationError and UnicodeDecodeError are both ValueErrors
-	try:
-		with open(processed_document_path, encoding="utf-8") as processed_document_file:
-			processed_document_json = processed_document_file.read()
-		processed_document = Document.model_validate_json(processed_document_json)
-	except (OSError, ValueError) as load_error:
-		logger.warning("Cached document %s is damaged: %s (%s)", doc_id, processed_document_path, describe_error(load_error))
-		return None
-
-	return processed_document
-
 def save_processed_document(storage_path: str, dataset_name: str, document: Document):
 	"""
 	Input:
-		storage_path - the cache folder (cache_dir given to ingest_documents).
+		storage_path - the run's temporary storage folder.
 		dataset_name - name of the dataset (DatasetConfig.name).
-		document - the processed Document to cache.
+		document - the processed Document to save.
 	Output:
 		None.
 	What it does:
-		Writes the document as JSON to its cached file (see
+		Writes the document as JSON to its file (see
 		get_processed_document_path), creating the processed/ folder if
 		needed. The JSON is first written to a temporary file next to it,
-		which then replaces the cached file in one step. If the program
-		stops halfway through writing, only the temporary file is left
-		incomplete, so load_processed_document never reads a half-written
-		cached file.
+		which then replaces the document's file in one step, so the file
+		is never left half-written.
 	"""
 	processed_document_path = get_processed_document_path(storage_path, dataset_name, document.id)
 	temporary_document_path = f"{processed_document_path}.tmp"

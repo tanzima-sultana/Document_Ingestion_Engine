@@ -1,7 +1,6 @@
 import importlib.util
 import logging
 import os
-import tempfile
 
 from doc_ingest.dataset_hf import has_hugging_face_name_shape
 from doc_ingest.dataset_hf import is_url
@@ -14,12 +13,11 @@ from doc_ingest.settings import PDF_PARSER_NAMES
 logger = logging.getLogger(__name__)
 
 
-def validate_inputs(size: int, input_path: str, storage_path: str | None, download_settings: DownloadSettings, process_settings: ProcessSettings, parser_settings: ParserSettings):
+def validate_inputs(size: int, input_path: str, download_settings: DownloadSettings, process_settings: ProcessSettings, parser_settings: ParserSettings):
 	"""
 	Input:
 		size - maximum number of documents to process.
 		input_path - where to read documents from.
-		storage_path - the cache_dir folder where raw files, processed documents and progress are stored (None: caching off, checks 10-13 are skipped).
 		download_settings, process_settings, parser_settings - the run's settings.
 	Output:
 		None. Returns normally only if every check passes.
@@ -61,23 +59,6 @@ def validate_inputs(size: int, input_path: str, storage_path: str | None, downlo
 
 	# 9. input_path must be a local path that exists or a Hugging Face dataset name
 	validate_local_input_path_exists(input_path)
-
-	# Caching off: there is no storage folder to check
-	if storage_path is None:
-		return
-
-	# 10. storage_path must not be empty or only spaces
-	validate_storage_path_is_not_empty(storage_path)
-
-	# 11. if storage_path already exists, it must be a folder, not a file
-	validate_storage_path_is_not_a_file(storage_path)
-
-	# 12. storage_path must not be the input folder or inside it
-	# (runs before 13, so a bad storage folder is never created)
-	validate_storage_path_is_outside_input_folder(input_path, storage_path)
-
-	# 13. storage_path must be creatable and writable
-	validate_storage_path_is_writable(storage_path)
 
 
 def validate_size_is_integer(size):
@@ -236,102 +217,6 @@ def validate_local_input_path_exists(input_path):
 
 	if not is_local_path(input_path):
 		raise IngestError("input_path does not exist on this machine: " + repr(input_path))
-
-
-def validate_storage_path_is_not_empty(storage_path):
-	"""
-	Input:
-		storage_path - the cache folder (cache_dir given to ingest_documents).
-	Output:
-		None. Raises TypeError or IngestError if the check fails.
-	What it does:
-		Checks that storage_path is text and is not empty or made only of
-		spaces, tabs or newlines.
-	"""
-	storage_path_is_text = isinstance(storage_path, str)
-	if not storage_path_is_text:
-		raise TypeError("storage folder must be text, got " + type(storage_path).__name__ + ": " + repr(storage_path))
-
-	storage_path_without_spaces = storage_path.strip()
-	if storage_path_without_spaces == "":
-		raise IngestError("storage folder must not be empty, got " + repr(storage_path))
-
-
-def validate_storage_path_is_not_a_file(storage_path):
-	"""
-	Input:
-		storage_path - the cache folder (cache_dir given to ingest_documents).
-	Output:
-		None. Raises IngestError if the check fails.
-	What it does:
-		If storage_path already exists, checks that it is a folder and not
-		a file. A path that does not exist yet passes, because it will be
-		created as a folder.
-	"""
-	storage_path_exists = os.path.exists(storage_path)
-	if not storage_path_exists:
-		return
-
-	storage_path_is_folder = os.path.isdir(storage_path)
-	if not storage_path_is_folder:
-		raise IngestError("storage folder already exists and is a file, not a folder: " + repr(storage_path))
-
-
-def validate_storage_path_is_outside_input_folder(input_path, storage_path):
-	"""
-	Input:
-		input_path - the --input_path value.
-		storage_path - the cache folder (cache_dir given to ingest_documents).
-	Output:
-		None. Raises IngestError if the check fails.
-	What it does:
-		If input_path is a local folder, checks that storage_path is not
-		that same folder and not anywhere inside it. Otherwise a later run
-		would read its own stored files as input documents.
-		Both paths are turned into full real paths first (symbolic links
-		resolved), so "./data" and "data/" count as the same folder.
-		Skipped when input_path is not a local folder (a file or a
-		dataset name).
-	"""
-	input_path_is_folder = os.path.isdir(input_path)
-	if not input_path_is_folder:
-		return
-
-	real_input_folder = os.path.realpath(input_path)
-	real_storage_folder = os.path.realpath(storage_path)
-
-	if real_storage_folder == real_input_folder:
-		raise IngestError("storage folder must not be the same folder as input_path: " + repr(storage_path) + ". Choose a cache_dir outside it.")
-
-	shared_parent_folder = os.path.commonpath([real_input_folder, real_storage_folder])
-	storage_is_inside_input = shared_parent_folder == real_input_folder
-	if storage_is_inside_input:
-		raise IngestError("storage folder must not be inside the input_path folder: " + repr(storage_path) + ". Choose a cache_dir outside it.")
-
-
-def validate_storage_path_is_writable(storage_path):
-	"""
-	Input:
-		storage_path - the cache folder (cache_dir given to ingest_documents).
-	Output:
-		None. Raises IngestError if the check fails.
-	What it does:
-		Creates the storage_path folder if it does not exist yet, then
-		writes a small temporary test file inside it and deletes it again.
-		This is the most reliable way to know that results can be saved
-		there. Raises an error if the folder cannot be created or the
-		test file cannot be written.
-	"""
-	try:
-		os.makedirs(storage_path, exist_ok=True)
-	except OSError as create_error:
-		raise IngestError("storage folder could not be created: " + repr(storage_path) + " (" + str(create_error) + ")")
-
-	try:
-		with tempfile.TemporaryFile(dir=storage_path) as test_file:
-			test_file.write(b"write test")
-	except OSError as write_error:
-		raise IngestError("storage folder is not writable: " + repr(storage_path) + " (" + str(write_error) + ")")
 
 
 def is_local_path(path):

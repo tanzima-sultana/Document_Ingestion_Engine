@@ -2,13 +2,12 @@
 End-to-end tests for ingest_documents on a local folder of generated PDFs.
 """
 
-import json
 import os
 import tempfile
 import unittest
 
 import helpers
-from doc_ingest.dataset_config import get_dataset_name
+from doc_ingest.error import IngestError
 from doc_ingest.ingest import ingest_documents
 from doc_ingest.settings import DownloadSettings
 from doc_ingest.settings import ProcessSettings
@@ -20,7 +19,6 @@ class TestIngestDocuments(unittest.TestCase):
 		self.temporary_folder = tempfile.TemporaryDirectory()
 		self.root = self.temporary_folder.name
 		self.input_folder = os.path.join(self.root, "pdfs")
-		self.output_path = os.path.join(self.root, "out")
 
 		report = helpers.make_report_pdf("finance", 4)
 		helpers.write_file(self.input_folder, "a_report.pdf", report)
@@ -34,28 +32,17 @@ class TestIngestDocuments(unittest.TestCase):
 	def tearDown(self):
 		self.temporary_folder.cleanup()
 
-	def run_ingest(self, size, use_cache=True):
-		"""Runs ingest_documents quietly, caching in output_path unless use_cache is False; returns (documents, logged output)."""
-		cache_dir = None
-		if use_cache:
-			cache_dir = self.output_path
+	def run_ingest(self, size):
+		"""Runs ingest_documents quietly; returns (documents, logged output)."""
 		with self.assertLogs("doc_ingest", level="INFO") as captured_logs:
 			ingest_result = ingest_documents(
 				size,
 				self.input_folder,
 				download_settings=DownloadSettings(download_workers=2),
 				process_settings=ProcessSettings(parse_workers=2),
-				cache_dir=cache_dir,
 			)
 		logged_output = "\n".join(captured_logs.output)
 		return ingest_result.documents, logged_output
-
-	def read_progress(self):
-		"""Reads the dataset's progress.json."""
-		dataset_name = get_dataset_name(self.input_folder)
-		progress_path = os.path.join(self.output_path, f"data_{dataset_name}", "progress.json")
-		with open(progress_path, encoding="utf-8") as progress_file:
-			return json.load(progress_file)
 
 	def test_full_run(self):
 		"""Good PDFs are kept; copy, blank, broken and encrypted ones are not."""
@@ -67,33 +54,10 @@ class TestIngestDocuments(unittest.TestCase):
 		sources.sort()
 		self.assertEqual(sources, ["a_report.pdf", "c_weather.pdf", "d_memo.pdf"])
 
-		saved_progress = self.read_progress()
-		self.assertEqual(saved_progress["raw_data_count"], 7)
-		self.assertEqual(len(saved_progress["processed_doc_ids"]), 3)
-		self.assertEqual(len(saved_progress["skipped_doc_ids"]), 3)
-
 		self.assertIn("Requested 20 document(s), returned 3.", printed_output)
 		self.assertIn("Skipped 2 document(s) that failed in parsing.", printed_output)
 		self.assertIn("Skipped 1 document(s) with no text.", printed_output)
 		self.assertIn("Skipped 1 document(s) due to duplicate detection.", printed_output)
-
-	def test_resume_from_cache(self):
-		"""A second, smaller run loads documents from the cache."""
-		self.run_ingest(20)
-		documents, printed_output = self.run_ingest(2)
-		self.assertEqual(len(documents), 2)
-		self.assertIn("Documents 2 have been loaded from cache", printed_output)
-		self.assertIn("Batches: 0", printed_output)
-
-	def test_resume_continues_after_read_rows(self):
-		"""A run that stops early continues from where it stopped."""
-		first_documents, first_output = self.run_ingest(1)
-		self.assertEqual(len(first_documents), 1)
-
-		second_documents, second_output = self.run_ingest(20)
-		self.assertEqual(len(second_documents), 3)
-		self.assertIn("Documents 1 have been loaded from cache", second_output)
-		self.assertEqual(self.read_progress()["raw_data_count"], 7)
 
 	def list_temporary_ingest_folders(self):
 		"""Returns the names of doc_ingest's temporary folders in the system temp folder."""
@@ -103,19 +67,26 @@ class TestIngestDocuments(unittest.TestCase):
 				folder_names.append(entry_name)
 		return folder_names
 
-	def test_run_without_cache(self):
-		"""Caching off returns the same documents and leaves nothing on disk, so a second run starts over."""
+	def test_temporary_folder_removed_after_run(self):
+		"""A run leaves nothing on disk, so a second run starts over and returns the same documents."""
 		temporary_folders_before = self.list_temporary_ingest_folders()
 
-		documents, printed_output = self.run_ingest(20, use_cache=False)
+		documents, printed_output = self.run_ingest(20)
 		self.assertEqual(len(documents), 3)
-		self.assertIn("Skipped 1 document(s) due to duplicate detection.", printed_output)
-		self.assertFalse(os.path.exists(self.output_path))
 		self.assertEqual(self.list_temporary_ingest_folders(), temporary_folders_before)
 
-		second_documents, second_output = self.run_ingest(20, use_cache=False)
+		second_documents, second_output = self.run_ingest(20)
 		self.assertEqual(len(second_documents), 3)
-		self.assertIn("Documents 0 have been loaded from cache", second_output)
+		self.assertIn("Skipped 1 document(s) due to duplicate detection.", second_output)
+		self.assertEqual(self.list_temporary_ingest_folders(), temporary_folders_before)
+
+	def test_temporary_folder_removed_after_failed_run(self):
+		"""A run that fails validation also removes its temporary folder."""
+		temporary_folders_before = self.list_temporary_ingest_folders()
+
+		with self.assertRaises(IngestError):
+			ingest_documents(0, self.input_folder)
+		self.assertEqual(self.list_temporary_ingest_folders(), temporary_folders_before)
 
 
 if __name__ == "__main__":

@@ -9,8 +9,8 @@ from doc_ingest.text_cleanup import fix_broken_characters
 
 class IngestError(ValueError):
 	"""
-	A problem the user can fix (bad input, unusable storage folder, damaged
-	progress file). The CLI prints only its message, without a traceback.
+	A problem the user can fix (bad input or settings).
+	The CLI prints only its message, without a traceback.
 	"""
 
 

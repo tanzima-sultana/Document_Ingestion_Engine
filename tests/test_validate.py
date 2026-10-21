@@ -20,52 +20,37 @@ class TestValidateInputs(unittest.TestCase):
 		self.root = self.temporary_folder.name
 		self.input_folder = os.path.join(self.root, "input")
 		os.makedirs(self.input_folder)
-		self.output_folder = os.path.join(self.root, "output")
 
 	def tearDown(self):
 		self.temporary_folder.cleanup()
 
-	def validate_with_default_settings(self, size, input_path, storage_path):
+	def validate_with_default_settings(self, size, input_path):
 		"""Runs validate_inputs with default download and process settings."""
-		validate.validate_inputs(size, input_path, storage_path, DownloadSettings(), ProcessSettings(), ParserSettings())
+		validate.validate_inputs(size, input_path, DownloadSettings(), ProcessSettings(), ParserSettings())
 
 	def validate_settings(self, download_settings, process_settings):
-		"""Runs validate_inputs with valid size and paths and the given settings."""
-		validate.validate_inputs(5, self.input_folder, self.output_folder, download_settings, process_settings, ParserSettings())
+		"""Runs validate_inputs with valid size and input path and the given settings."""
+		validate.validate_inputs(5, self.input_folder, download_settings, process_settings, ParserSettings())
 
 	def test_valid_inputs_pass(self):
-		"""Valid size and paths raise nothing."""
-		self.validate_with_default_settings(5, self.input_folder, self.output_folder)
+		"""Valid size and input path raise nothing."""
+		self.validate_with_default_settings(5, self.input_folder)
 
 	def test_bad_size(self):
 		"""Size must be a positive whole number, not a boolean."""
 		with self.assertRaises(TypeError):
-			self.validate_with_default_settings(True, self.input_folder, self.output_folder)
+			self.validate_with_default_settings(True, self.input_folder)
 		with self.assertRaises(TypeError):
-			self.validate_with_default_settings(2.5, self.input_folder, self.output_folder)
+			self.validate_with_default_settings(2.5, self.input_folder)
 		with self.assertRaises(ValueError):
-			self.validate_with_default_settings(0, self.input_folder, self.output_folder)
+			self.validate_with_default_settings(0, self.input_folder)
 
 	def test_bad_input_path(self):
 		"""Empty or missing local input paths fail."""
 		with self.assertRaises(ValueError):
-			self.validate_with_default_settings(5, "   ", self.output_folder)
+			self.validate_with_default_settings(5, "   ")
 		with self.assertRaises(ValueError):
-			self.validate_with_default_settings(5, os.path.join(self.root, "missing"), self.output_folder)
-
-	def test_output_is_a_file(self):
-		"""An output path that is a file fails."""
-		output_file = os.path.join(self.root, "out.txt")
-		with open(output_file, "w") as file:
-			file.write("x")
-		with self.assertRaises(ValueError):
-			self.validate_with_default_settings(5, self.input_folder, output_file)
-
-	def test_output_inside_input(self):
-		"""An output folder inside the input folder fails."""
-		with self.assertRaises(ValueError):
-			self.validate_with_default_settings(5, self.input_folder, os.path.join(self.input_folder, "out"))
-
+			self.validate_with_default_settings(5, os.path.join(self.root, "missing"))
 
 	def test_valid_settings_pass(self):
 		"""Default settings, and parse_workers left as None, raise nothing."""
@@ -105,11 +90,11 @@ class TestValidateInputs(unittest.TestCase):
 
 	def test_pdf_parser(self):
 		"""pdf_parser must be text and one of the known PDF parsers."""
-		validate.validate_inputs(5, self.input_folder, self.output_folder, DownloadSettings(), ProcessSettings(), ParserSettings(pdf_parser="pypdf"))
+		validate.validate_inputs(5, self.input_folder, DownloadSettings(), ProcessSettings(), ParserSettings(pdf_parser="pypdf"))
 		with self.assertRaises(IngestError):
-			validate.validate_inputs(5, self.input_folder, self.output_folder, DownloadSettings(), ProcessSettings(), ParserSettings(pdf_parser="pymupdf"))
+			validate.validate_inputs(5, self.input_folder, DownloadSettings(), ProcessSettings(), ParserSettings(pdf_parser="pymupdf"))
 		with self.assertRaises(TypeError):
-			validate.validate_inputs(5, self.input_folder, self.output_folder, DownloadSettings(), ProcessSettings(), ParserSettings(pdf_parser=None))
+			validate.validate_inputs(5, self.input_folder, DownloadSettings(), ProcessSettings(), ParserSettings(pdf_parser=None))
 
 
 if __name__ == "__main__":

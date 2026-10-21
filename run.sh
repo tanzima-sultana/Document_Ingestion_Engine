@@ -19,8 +19,6 @@ export PYTHONPATH="$(pwd)/src"
 
 SIZE=5000
 INPUT_PATH="pixparse/pdfa-eng-wds"
-# Benchmark runs cache into their own folder in the repo
-CACHE_DIR="$(pwd)/outputs"
 
 # Download settings (each one is optional for the CLI; leaving a flag out uses the library default)
 DOWNLOAD_WORKERS="${1:-64}"
@@ -32,9 +30,6 @@ PARSE_WORKERS="${2:-16}"
 PARSE_TIMEOUT_SECONDS=120
 DEDUP_THRESHOLD=0.90
 
-# Always start from an empty cache folder; logs are kept
-rm -rf "${CACHE_DIR:?}"
-
 mkdir -p logs
 LOG="logs/log_${SIZE}_download${DOWNLOAD_WORKERS}_parse${PARSE_WORKERS}.txt"
 
@@ -43,7 +38,6 @@ LOG="logs/log_${SIZE}_download${DOWNLOAD_WORKERS}_parse${PARSE_WORKERS}.txt"
 python3 -m doc_ingest \
 	--size "$SIZE" \
 	--input_path "$INPUT_PATH" \
-	--cache_dir "$CACHE_DIR" \
 	--download_workers "$DOWNLOAD_WORKERS" \
 	--max_batch_rows "$MAX_BATCH_ROWS" \
 	--hugging_face_split "$HUGGING_FACE_SPLIT" \

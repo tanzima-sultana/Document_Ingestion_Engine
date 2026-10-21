@@ -78,7 +78,7 @@ class RawDataFetcher:
 			rows per batch and Hugging Face split.
 		Output: none.
 		What it does: stores the inputs for the other methods. The next
-			row number starts at 0 and is set by get_iterator.
+			row number starts at 0.
 		"""
 		self.input_path = input_path
 		self.storage_path = storage_path
@@ -86,38 +86,36 @@ class RawDataFetcher:
 		self.download_settings = download_settings
 		self.next_row_number = 0
 
-	def get_iterator(self, raw_data_count: int) -> Iterator:
+	def get_iterator(self) -> Iterator:
 		"""
-		Input: raw_data_count - number of source rows already read in
-			earlier runs; these are skipped.
+		Input: none.
 		Output: an iterator of rows, in a fixed source order. A row is a
 			record dict (Hugging Face/JSONL/JSON) or a local file path.
 		What it does: picks how to read the dataset:
 			- Hugging Face dataset: streams its rows.
 			- JSONL/JSON dataset: reads records one by one.
 			- Local file or folder: yields the document files.
-			Also sets next_row_number to raw_data_count, the position of
-			the first row returned in the whole dataset.
+			Every iterator starts at the first row, so next_row_number is
+			reset to 0.
 		"""
-		self.next_row_number = raw_data_count
+		self.next_row_number = 0
 
 		if self.dataset_config.path_type == "hf":
-			return self.iterate_hugging_face_rows(raw_data_count)
+			return self.iterate_hugging_face_rows()
 
 		if self.dataset_config.content_field is not None:
-			return self.iterate_container_records(raw_data_count)
+			return self.iterate_container_records()
 
-		return self.iterate_local_files(raw_data_count)
+		return self.iterate_local_files()
 
-	def iterate_hugging_face_rows(self, rows_to_skip: int) -> Iterator:
+	def iterate_hugging_face_rows(self) -> Iterator:
 		"""
-		Input: rows_to_skip - number of rows already read in earlier runs.
+		Input: none.
 		Output: an iterator of row dicts, one per dataset row. A row that
 			cannot be unwrapped is printed and given as None, so it still
 			counts as read.
 		What it does: opens the Hugging Face dataset in streaming mode, so
-			rows are downloaded as they are read, and skips the rows read
-			before.
+			rows are downloaded as they are read.
 		"""
 		# Imported here so local datasets do not pay the import cost.
 		from datasets import load_dataset
@@ -125,7 +123,6 @@ class RawDataFetcher:
 		dataset = load_dataset(self.input_path, split=self.download_settings.hugging_face_split, streaming=True)
 		# Keep file columns (e.g. Pdf) as raw bytes instead of opening them
 		dataset = dataset.decode(False)
-		dataset = dataset.skip(rows_to_skip)
 
 		for row in dataset:
 			try:
@@ -135,35 +132,25 @@ class RawDataFetcher:
 				unwrapped_row = None
 			yield unwrapped_row
 
-	def iterate_container_records(self, records_to_skip: int) -> Iterator:
+	def iterate_container_records(self) -> Iterator:
 		"""
-		Input: records_to_skip - number of records already read in earlier
-			runs.
+		Input: none.
 		Output: an iterator of record dicts across all container files, in
 			order.
-		What it does: reads the records of each JSONL/JSON file and skips
-			the records read before.
-			Skipped records still have to be read, because a JSONL/JSON file
-			cannot be jumped into at a record number.
+		What it does: reads the records of each JSONL/JSON file one by one.
 		"""
-		records_seen = 0
 		for container_file_path in self.list_local_document_files():
 			for record in self.read_container_records(container_file_path):
-				if records_seen < records_to_skip:
-					records_seen = records_seen + 1
-					continue
 				yield record
-				records_seen = records_seen + 1
 
-	def iterate_local_files(self, files_to_skip: int) -> Iterator:
+	def iterate_local_files(self) -> Iterator:
 		"""
-		Input: files_to_skip - number of files already read in earlier runs.
+		Input: none.
 		Output: an iterator of document file paths.
-		What it does: lists the dataset's document files in sorted order and
-			skips the files read before.
+		What it does: lists the dataset's document files in sorted order.
 		"""
 		document_file_paths = self.list_local_document_files()
-		for document_file_path in document_file_paths[files_to_skip:]:
+		for document_file_path in document_file_paths:
 			yield document_file_path
 
 	def list_local_document_files(self) -> list[str]:
