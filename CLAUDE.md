@@ -37,42 +37,35 @@ All commands below assume cuprrent working directory is the repo root (`DocInges
 ## Project Structure
 
 ```
-	pyproject.toml
-	CLAUDE.md
-	README.md
-	run.sh
-	src/
-		doc_ingest/
-			__init__.py          # Exposes main library entry point
-			__main__.py          # Exposes main terminal entry point
-			settings.py          # Download and process document command line optional args
-			ingest.py            # ingest_documents(size, input_path, output_path) orchastrator
-			schema.py            # Pydantic models for output JSON
-			validate.py		     # Validate given parameters and dataset config
-			dataset_config.py    # Given dataset config
-			dataset_hf.py    	 # HuggingFace dataset config
-			dataset_local.py     # Local dataset config
-			document_type.py 	 # Document type and content
-			raw_data.py 	     # Raw data batch processing
-			cache.py	         # Store and retrieve cached document
-			progress.py 		 # Save progress of cached and processed documents
-			text_cleanup.py      # Cleans Document.text. Strips headers/footers, collapses repeated whitespace and blank lines
-			metadata.py          # Extracts generic metadata from a document's raw bytes
-			dedup.py             # Detects exact duplicates (hash) and near-duplicates (MinHash/LSH)
-			summary.py		     # Print summary results 
-			error.py 			 # errors
-			parser.py            # Abstract parser base class plus the parser registry lookup (maps doc type -> parser)
-			parsers/
-				pdf.py          # Native text PDFs
-				scanned_pdf.py  # OCR for scanned/image PDFs
-				docx.py         # Word documents
-				pptx.py         # PowerPoint slides & speaker notes 
-				xlsx.py         # Excel multi-sheet workbooks 
-				csv.py          # Flat CSV files
-				html.py         # Web pages & scraped URLs
-				md.py           # Markdown files 
-				txt.py          # Plain text, logs, code files     
+config.yaml			 # command line parameters
+run.sh			 	 # run the doc_ingest engine
 
-	logs/
-	tests/
+src/doc_ingest/
+	__init__.py          # public API 
+	__main__.py          # CLI
+	ingest.py            # orchestrator
+	settings.py          # DownloadSettings / ProcessSettings / ParserSettings
+	schema.py            # Document, Metadata
+	validate.py          # input + settings checks
+	summary.py           # run Summary
+	error.py             # IngestError, describe_error
+
+	dataset/             # where documents come from
+		__init__.py
+		config.py        # dataset config
+		hf.py            # huggingface dataset config
+		local.py         # local dataset config
+		raw_data.py      # RawData, RawDataFetcher (download + batches)
+		document_type.py # detect document type from extension/bytes
+
+	processing/          # after parsing
+		__init__.py
+		text_cleanup.py
+		metadata.py
+		dedup.py
+
+	parsers/             # raw document -> Document
+		__init__.py
+		base.py          # Abstract base class Parser : Parser, get_parser, parse_document, timeout
+		pdf.py
 ```
