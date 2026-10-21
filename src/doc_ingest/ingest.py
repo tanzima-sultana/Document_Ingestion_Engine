@@ -18,7 +18,6 @@ from doc_ingest.error import describe_error
 from doc_ingest import dataset_config
 from doc_ingest import dataset_hf
 from doc_ingest import validate
-from doc_ingest import cache
 from doc_ingest import parser
 from doc_ingest.settings import DownloadSettings
 from doc_ingest.settings import ProcessSettings
@@ -198,7 +197,7 @@ class IngestEngine:
 		"""
 		Input: parsed_docs - (doc_id, Document or None) pairs from parse_batch.
 		Output: None. Adds kept documents to documents.
-		What it does: skips failed, empty and duplicate documents and saves the rest to the temporary folder. Raises OSError if the folder can't be written.
+		What it does: skips failed, empty and duplicate documents and keeps the rest in memory.
 		"""
 		for doc_id, doc in parsed_docs:
 
@@ -224,13 +223,8 @@ class IngestEngine:
 				if not self.deduplicator.add_if_new(doc):
 					self.summary.duplicate += 1
 					continue
-
-				cache.save_processed_document(self.storage_path, self.db_config.name, doc)
-			except OSError:
-				# Writing to the storage folder failed: stop the run
-				raise
 			except Exception as error:
-				logger.warning("Skipping document %s: duplicate check or saving failed: %s", doc_id, describe_error(error))
+				logger.warning("Skipping document %s: duplicate check failed: %s", doc_id, describe_error(error))
 				self.summary.skipped += 1
 				self.summary.keep_error += 1
 				continue

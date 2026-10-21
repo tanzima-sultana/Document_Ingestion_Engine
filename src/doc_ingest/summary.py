@@ -59,7 +59,7 @@ def print_run_summary(summary: Summary) -> None:
 	logger.info("Skipped %s row(s) that could not be prepared for parsing.", summary.prepare_failed)
 	logger.info("Skipped %s document(s) that failed in parsing.", summary.parse_error)
 	logger.info("Skipped %s document(s) with no text.", summary.no_text)
-	logger.info("Skipped %s document(s) that failed in duplicate check or saving.", summary.keep_error)
+	logger.info("Skipped %s document(s) that failed in duplicate check.", summary.keep_error)
 	logger.info("Skipped %s document(s) in total.", summary.skipped)
 	logger.info("Skipped %s document(s) due to duplicate detection.", summary.duplicate)
 	logger.info("Total time: %.1fs (download %.1fs, parse %.1fs)", summary.total_seconds, summary.download_seconds, summary.parse_seconds)
