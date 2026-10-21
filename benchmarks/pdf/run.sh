@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 
-# Usage: ./benchmarks/langchain/run_langchain.sh [input_path]
+# Usage: ./benchmarks/pdf/run.sh [input_path]
 
 # Fail the whole pipeline (not just tee) if python exits with an error
 set -o pipefail
 
-# This script lives in benchmarks/langchain/, so the repo root is two folders up
+# This script lives in benchmarks/pdf/, so the repo root is two folders up
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 cd "$REPO_ROOT"
