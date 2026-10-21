@@ -1,5 +1,5 @@
 """
-parser.py
+parsers/base.py
 
 Defines the Parser interface every format implementation must follow,
 plus the registry mapping document type -> implementation, the lookup
@@ -21,7 +21,7 @@ import threading
 import time 
 
 from doc_ingest.schema import Document
-from doc_ingest.raw_data import RawData
+from doc_ingest.dataset.raw_data import RawData
 from doc_ingest.error import describe_error
 from doc_ingest.settings import ParserSettings
 

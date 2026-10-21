@@ -1,5 +1,5 @@
 """
-Tests for dataset_config.py, dataset_hf.py and document_type.py: input path
+Tests for dataset/config.py, dataset/hf.py and dataset/document_type.py: input path
 kinds, dataset format/name/size, content field and encoding, and Hugging Face helpers.
 """
 
@@ -10,9 +10,9 @@ import tempfile
 import unittest
 
 import helpers
-from doc_ingest import dataset_config
-from doc_ingest import dataset_hf
-from doc_ingest import document_type
+from doc_ingest.dataset import config as dataset_config
+from doc_ingest.dataset import hf as dataset_hf
+from doc_ingest.dataset import document_type
 
 
 class TestPathKinds(unittest.TestCase):

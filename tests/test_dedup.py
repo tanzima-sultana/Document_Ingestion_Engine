@@ -1,11 +1,11 @@
 """
-Tests for dedup.py: exact and near duplicate detection.
+Tests for processing/dedup.py: exact and near duplicate detection.
 """
 
 import unittest
 import unittest.mock
 
-from doc_ingest.dedup import Deduplicator
+from doc_ingest.processing.dedup import Deduplicator
 from doc_ingest.schema import Document
 from doc_ingest.schema import Metadata
 

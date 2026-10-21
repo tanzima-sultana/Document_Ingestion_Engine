@@ -1,5 +1,5 @@
 """
-metadata.py
+processing/metadata.py
 
 Builds the generic part of a document's Metadata (source, size, content
 hash) from its raw bytes, for every document type. Title, author and
@@ -11,8 +11,8 @@ import datetime
 import hashlib
 
 from doc_ingest.schema import Metadata
-from doc_ingest.raw_data import RawData
-from doc_ingest.text_cleanup import fix_broken_characters
+from doc_ingest.dataset.raw_data import RawData
+from doc_ingest.processing.text_cleanup import fix_broken_characters
 
 
 def extract_metadata(raw_data: RawData, raw_bytes: bytes) -> Metadata:

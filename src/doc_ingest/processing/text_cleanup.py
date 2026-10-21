@@ -1,5 +1,5 @@
 """
-text_cleanup.py
+processing/text_cleanup.py
 
 Cleans a document's text: strips repeated headers/footers and collapses
 repeated whitespace and blank lines. Works on plain text from any format;

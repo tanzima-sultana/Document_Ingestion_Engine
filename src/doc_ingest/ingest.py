@@ -9,16 +9,16 @@ import tempfile
 import time
 
 from doc_ingest.schema import Document
-from doc_ingest.raw_data import RawDataFetcher
-from doc_ingest.dedup import Deduplicator
+from doc_ingest.dataset.raw_data import RawDataFetcher
+from doc_ingest.processing.dedup import Deduplicator
 from doc_ingest.summary import Summary
 from doc_ingest.summary import print_run_summary
 from doc_ingest.error import describe_error
 
-from doc_ingest import dataset_config
-from doc_ingest import dataset_hf
+from doc_ingest.dataset import config as dataset_config
+from doc_ingest.dataset import hf as dataset_hf
 from doc_ingest import validate
-from doc_ingest import parser
+from doc_ingest.parsers import base as parser
 from doc_ingest.settings import DownloadSettings
 from doc_ingest.settings import ProcessSettings
 from doc_ingest.settings import ParserSettings

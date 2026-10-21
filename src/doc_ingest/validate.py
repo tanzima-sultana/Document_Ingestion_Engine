@@ -2,8 +2,8 @@ import importlib.util
 import logging
 import os
 
-from doc_ingest.dataset_hf import has_hugging_face_name_shape
-from doc_ingest.dataset_hf import is_url
+from doc_ingest.dataset.hf import has_hugging_face_name_shape
+from doc_ingest.dataset.hf import is_url
 from doc_ingest.error import IngestError
 from doc_ingest.settings import DownloadSettings
 from doc_ingest.settings import ProcessSettings

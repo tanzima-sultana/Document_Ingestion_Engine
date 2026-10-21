@@ -1,5 +1,5 @@
 """
-Tests for parsers/pdf.py, parser.py and metadata.py on generated PDFs.
+Tests for parsers/pdf.py, parsers/base.py and processing/metadata.py on generated PDFs.
 """
 
 import hashlib
@@ -8,12 +8,12 @@ import tempfile
 import unittest
 
 import helpers
-from doc_ingest.metadata import extract_metadata
-from doc_ingest.parser import parse_document
+from doc_ingest.processing.metadata import extract_metadata
+from doc_ingest.parsers.base import parse_document
 from doc_ingest.parsers.pdf import PyPdfParser
 from doc_ingest.parsers.pdf import PyPdfium2Parser
 from doc_ingest.settings import ParserSettings
-from doc_ingest.raw_data import RawData
+from doc_ingest.dataset.raw_data import RawData
 from doc_ingest.schema import DocumentType
 
 

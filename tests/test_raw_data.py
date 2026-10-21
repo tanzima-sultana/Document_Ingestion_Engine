@@ -1,5 +1,5 @@
 """
-Tests for raw_data.py: reading rows, per-document type, source path
+Tests for dataset/raw_data.py: reading rows, per-document type, source path
 and counts in a batch.
 """
 
@@ -10,8 +10,8 @@ import tempfile
 import unittest
 
 import helpers
-from doc_ingest.dataset_config import get_dataset_config
-from doc_ingest.raw_data import RawDataFetcher
+from doc_ingest.dataset.config import get_dataset_config
+from doc_ingest.dataset.raw_data import RawDataFetcher
 from doc_ingest.settings import DownloadSettings
 
 

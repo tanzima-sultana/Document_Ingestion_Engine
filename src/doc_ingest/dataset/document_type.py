@@ -1,5 +1,5 @@
 """
-document_type.py
+dataset/document_type.py
 
 Works out a document's type (the parser registry key, e.g. "pdf") from its
 file extension or from its leading bytes.

@@ -1,5 +1,5 @@
 """
-dataset_local.py
+dataset/local.py
 
 Local datasets: a single document file, a folder of document files, or
 JSONL/JSON container files holding many documents as records.
@@ -8,8 +8,8 @@ JSONL/JSON container files holding many documents as records.
 import json
 import os
 
-from doc_ingest.document_type import EXTENSION_TO_DOCUMENT_TYPE
-from doc_ingest.document_type import get_extension_of_file
+from doc_ingest.dataset.document_type import EXTENSION_TO_DOCUMENT_TYPE
+from doc_ingest.dataset.document_type import get_extension_of_file
 
 
 # Extensions of files that hold many documents as records, with each

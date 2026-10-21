@@ -1,5 +1,5 @@
 """
-dedup.py
+processing/dedup.py
 
 Finds exact duplicates (same content hash) and near-duplicates (MinHash
 signatures with LSH) among the documents kept in a run.

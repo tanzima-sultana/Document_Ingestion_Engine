@@ -4,7 +4,7 @@ error.py
 The library's exception and error helpers, shared across modules.
 """
 
-from doc_ingest.text_cleanup import fix_broken_characters
+from doc_ingest.processing.text_cleanup import fix_broken_characters
 
 
 class IngestError(ValueError):

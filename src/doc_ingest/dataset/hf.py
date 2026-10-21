@@ -1,5 +1,5 @@
 """
-dataset_hf.py
+dataset/hf.py
 
 Hugging Face datasets: recognizing a dataset name or dataset page URL,
 reading the first row and the row count, and turning hf:// file paths into

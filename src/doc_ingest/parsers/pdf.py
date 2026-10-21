@@ -18,14 +18,14 @@ import logging
 
 import pypdf
 
-from doc_ingest.parser import Parser
+from doc_ingest.parsers.base import Parser
 from doc_ingest.schema import Document
 from doc_ingest.schema import DocumentType
-from doc_ingest.raw_data import RawData
-from doc_ingest.metadata import extract_metadata
-from doc_ingest.metadata import clean_property_text
-from doc_ingest.metadata import format_creation_date
-from doc_ingest.text_cleanup import clean_text
+from doc_ingest.dataset.raw_data import RawData
+from doc_ingest.processing.metadata import extract_metadata
+from doc_ingest.processing.metadata import clean_property_text
+from doc_ingest.processing.metadata import format_creation_date
+from doc_ingest.processing.text_cleanup import clean_text
 from doc_ingest.error import describe_error
 
 logger = logging.getLogger(__name__)

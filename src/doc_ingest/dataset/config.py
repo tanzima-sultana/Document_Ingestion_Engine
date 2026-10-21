@@ -1,9 +1,9 @@
 """
-dataset_config.py
+dataset/config.py
 
 Builds a DatasetConfig for an input path by putting together what the
-dataset modules find: dataset_local.py for local files and folders,
-dataset_hf.py for Hugging Face datasets. Also holds the record handling
+dataset modules find: local.py for local files and folders,
+hf.py for Hugging Face datasets. Also holds the record handling
 both share: which field holds the document, and how it is encoded.
 """
 
@@ -13,16 +13,16 @@ import dataclasses
 import hashlib
 import os
 
-from doc_ingest.dataset_hf import HUGGING_FACE_FILE_PREFIX
-from doc_ingest.dataset_hf import HUGGING_FACE_FORMAT
-from doc_ingest.dataset_hf import get_hugging_face_row_count
-from doc_ingest.dataset_hf import is_hugging_face_dataset
-from doc_ingest.dataset_hf import is_url
-from doc_ingest.dataset_hf import read_first_hugging_face_record
-from doc_ingest.dataset_local import CONTAINER_EXTENSIONS
-from doc_ingest.dataset_local import get_local_dataset_format
-from doc_ingest.dataset_local import get_local_dataset_size
-from doc_ingest.dataset_local import read_first_local_record
+from doc_ingest.dataset.hf import HUGGING_FACE_FILE_PREFIX
+from doc_ingest.dataset.hf import HUGGING_FACE_FORMAT
+from doc_ingest.dataset.hf import get_hugging_face_row_count
+from doc_ingest.dataset.hf import is_hugging_face_dataset
+from doc_ingest.dataset.hf import is_url
+from doc_ingest.dataset.hf import read_first_hugging_face_record
+from doc_ingest.dataset.local import CONTAINER_EXTENSIONS
+from doc_ingest.dataset.local import get_local_dataset_format
+from doc_ingest.dataset.local import get_local_dataset_size
+from doc_ingest.dataset.local import read_first_local_record
 from doc_ingest.settings import DEFAULT_HUGGING_FACE_SPLIT
 
 

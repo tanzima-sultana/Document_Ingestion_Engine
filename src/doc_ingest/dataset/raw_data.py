@@ -10,17 +10,17 @@ import hashlib
 import json
 from typing import Iterator
 
-from doc_ingest.dataset_config import DatasetConfig
-from doc_ingest.dataset_config import get_content_encoding
-from doc_ingest.dataset_hf import URL_TIMEOUT_SECONDS
-from doc_ingest.dataset_hf import build_url_request
-from doc_ingest.dataset_hf import get_hugging_face_file_url
-from doc_ingest.dataset_hf import unwrap_file_values
-from doc_ingest.dataset_local import CONTAINER_EXTENSIONS
-from doc_ingest.dataset_local import list_dataset_files
-from doc_ingest.document_type import EXTENSION_TO_DOCUMENT_TYPE
-from doc_ingest.document_type import get_document_type_from_bytes
-from doc_ingest.document_type import get_extension_of_file
+from doc_ingest.dataset.config import DatasetConfig
+from doc_ingest.dataset.config import get_content_encoding
+from doc_ingest.dataset.hf import URL_TIMEOUT_SECONDS
+from doc_ingest.dataset.hf import build_url_request
+from doc_ingest.dataset.hf import get_hugging_face_file_url
+from doc_ingest.dataset.hf import unwrap_file_values
+from doc_ingest.dataset.local import CONTAINER_EXTENSIONS
+from doc_ingest.dataset.local import list_dataset_files
+from doc_ingest.dataset.document_type import EXTENSION_TO_DOCUMENT_TYPE
+from doc_ingest.dataset.document_type import get_document_type_from_bytes
+from doc_ingest.dataset.document_type import get_extension_of_file
 from doc_ingest.settings import DownloadSettings
 from doc_ingest.error import describe_error
 

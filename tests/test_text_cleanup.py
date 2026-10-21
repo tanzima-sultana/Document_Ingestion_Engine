@@ -1,10 +1,10 @@
 """
-Tests for text_cleanup.py, on plain page strings so no PDF is needed.
+Tests for processing/text_cleanup.py, on plain page strings so no PDF is needed.
 """
 
 import unittest
 
-from doc_ingest.text_cleanup import clean_text
+from doc_ingest.processing.text_cleanup import clean_text
 
 
 class TestCleanText(unittest.TestCase):
