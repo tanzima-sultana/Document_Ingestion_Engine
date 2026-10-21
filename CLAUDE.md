@@ -37,8 +37,11 @@ All commands below assume cuprrent working directory is the repo root (`DocInges
 ## Project Structure
 
 ```
-config.yaml			 # command line parameters
-run.sh			 	 # run the doc_ingest engine
+pyproject.toml
+README.md
+CLAUDE.md
+config.yaml                  # settings for run.sh
+run.sh                       # standalone run of the engine
 
 src/doc_ingest/
 	__init__.py          # public API 
@@ -68,4 +71,24 @@ src/doc_ingest/
 		__init__.py
 		base.py          # Abstract base class Parser : Parser, get_parser, parse_document, timeout
 		pdf.py
+	
+
+	tests/                       
+
+	benchmarks/
+		pdf/
+			download.py
+			langchain.py
+			config.yaml
+			run.sh
+			data/    
+				<dataset_name>_<size>/  
+		docx/
+			download.py
+			langchain.py
+			config.yaml
+			run.sh  	
+		    data/ 
+				<dataset_name>_<size>/           
+	logs/                        
 ```
