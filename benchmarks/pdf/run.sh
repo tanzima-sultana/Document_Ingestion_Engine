@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 
-# Usage: ./benchmarks/pdf/run.sh [input_path]
+# Usage: ./benchmarks/pdf/run.sh
+# Every setting is read from config.yaml next to this script; edit that file to change a run.
+# Downloads the benchmark PDFs once, then runs LangChain and doc_ingest on the same local folder.
 
 # Fail the whole pipeline (not just tee) if python exits with an error
 set -o pipefail
@@ -12,16 +14,24 @@ cd "$REPO_ROOT"
 
 source ~/pyenv/bin/activate
 
+if [ -f .env ]; then
+	source .env
+fi
+
 export PYTHONPATH="$REPO_ROOT/src"
 
-# Same PDFs doc_ingest downloaded; run.sh deletes outputs/, so copy them elsewhere for repeat runs
-INPUT_PATH="${1:-$REPO_ROOT/outputs/data_pdfa-eng-wds_6b87b8a4/raw}"
+CONFIG_PATH="$SCRIPT_DIR/config.yaml"
 
 mkdir -p logs
-LOG="logs/log_langchain.txt"
+RUN_TIME="$(date +%Y%m%d_%H%M%S)"
 
-# run
+# 1. Download the benchmark PDFs (skipped if already downloaded)
+python3 "$SCRIPT_DIR/download.py" --config_path "$CONFIG_PATH" || exit 1
 
-python3 "$SCRIPT_DIR/langchain.py" \
-	--input_path "$INPUT_PATH" \
-	2>&1 | tee "$LOG"
+# 2. LangChain
+python3 "$SCRIPT_DIR/langchain.py" --config_path "$CONFIG_PATH" \
+	2>&1 | tee "logs/benchmark_pdf_langchain_${RUN_TIME}.txt" || exit 1
+
+# 3. doc_ingest
+python3 -m doc_ingest --config_path "$CONFIG_PATH" \
+	2>&1 | tee "logs/benchmark_pdf_doc_ingest_${RUN_TIME}.txt" || exit 1

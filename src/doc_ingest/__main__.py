@@ -42,8 +42,10 @@ def load_config_file(config_path: str) -> dict:
 	"""
 	Input: config_path - path of a YAML config file (see config.yaml at the repo root).
 	Output: a flat dict of option name -> value, e.g. {"size": 5000, "download_workers": 64}.
-	What it does: reads the file and checks that every key is a known option, in its right group.
-		Raises ValueError with a readable message if the file is missing, is not valid YAML, or has an unknown key.
+	What it does: reads the file and checks that every key inside a settings group is a known option.
+		A top-level key that is not a doc_ingest option (e.g. a benchmark's "langchain" group) is skipped with a note,
+		so one config file can be shared with other tools. Raises ValueError with a readable message if the file is
+		missing, is not valid YAML, or a settings group has an unknown key.
 	"""
 	try:
 		with open(config_path, encoding="utf-8") as config_file:
@@ -66,7 +68,8 @@ def load_config_file(config_path: str) -> dict:
 			continue
 
 		if key not in CONFIG_GROUP_KEYS:
-			raise ValueError("unknown key in config file: " + repr(key))
+			print("Config key " + repr(key) + " is not a doc_ingest option, skipped.")
+			continue
 
 		# A group with nothing under it sets nothing
 		if value is None:
