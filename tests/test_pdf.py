@@ -12,7 +12,6 @@ from doc_ingest.metadata import extract_metadata
 from doc_ingest.parser import parse_document
 from doc_ingest.parsers.pdf import PyPdfParser
 from doc_ingest.parsers.pdf import PyPdfium2Parser
-from doc_ingest.parsers.pdf import parse_pdf_date
 from doc_ingest.settings import ParserSettings
 from doc_ingest.raw_data import RawData
 from doc_ingest.schema import DocumentType
@@ -183,6 +182,7 @@ class TestParsePdfDate(unittest.TestCase):
 
 	def test_date_formats(self):
 		"""PDF dates become the same datetimes pypdf gives."""
+		parse_pdf_date = PyPdfParser().parse_pdf_date
 		self.assertEqual(parse_pdf_date("D:20240301101500+00'00'").isoformat(), "2024-03-01T10:15:00+00:00")
 		self.assertEqual(parse_pdf_date("D:20200129160534Z").isoformat(), "2020-01-29T16:05:34+00:00")
 		self.assertEqual(parse_pdf_date("D:20240301101500+05'30'").isoformat(), "2024-03-01T10:15:00+05:30")
