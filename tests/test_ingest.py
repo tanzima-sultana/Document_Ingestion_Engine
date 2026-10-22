@@ -45,7 +45,7 @@ class TestIngestDocuments(unittest.TestCase):
 		return ingest_result.documents, logged_output
 
 	def test_full_run(self):
-		"""Good PDFs are kept; copy, blank, broken and encrypted ones are not."""
+		"""Good PDFs are kept; copy, blank, broken and encrypted ones are not (the encrypted test PDF opens like in LangChain, but has no text)."""
 		documents, printed_output = self.run_ingest(20)
 
 		sources = []
@@ -56,8 +56,8 @@ class TestIngestDocuments(unittest.TestCase):
 
 		self.assertIn("requested_size: 20", printed_output)
 		self.assertIn("documents_returned: 3", printed_output)
-		self.assertIn("parse_failed: 2", printed_output)
-		self.assertIn("no_text: 1", printed_output)
+		self.assertIn("parse_failed: 1", printed_output)
+		self.assertIn("no_text: 2", printed_output)
 		self.assertIn("duplicates: 1", printed_output)
 
 	def list_temporary_ingest_folders(self):

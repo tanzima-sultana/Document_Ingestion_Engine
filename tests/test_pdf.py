@@ -17,24 +17,6 @@ from doc_ingest.dataset.raw_data import RawData
 from doc_ingest.schema import DocumentType
 
 
-class FakePage:
-	def __init__(self, text):
-		self.text = text
-
-	def extract_text(self):
-		"""Returns the page text, or raises it if it is an error."""
-		if isinstance(self.text, Exception):
-			raise self.text
-		return self.text
-
-
-class FakeReader:
-	def __init__(self, page_texts):
-		self.pages = []
-		for page_text in page_texts:
-			self.pages.append(FakePage(page_text))
-
-
 class TestPDF(unittest.TestCase):
 
 	def setUp(self):
@@ -67,11 +49,12 @@ class TestPDF(unittest.TestCase):
 		with self.assertRaises(ValueError):
 			PyPdfParser().parse(raw_data)
 
-	def test_rejects_encrypted_pdf(self):
-		"""An encrypted PDF raises ValueError."""
+	def test_parses_encrypted_pdf(self):
+		"""An encrypted PDF that opens without a password is parsed, like in LangChain."""
 		raw_data = self.make_raw_data("locked.pdf", helpers.make_encrypted_pdf())
-		with self.assertRaises(ValueError):
-			PyPdfParser().parse(raw_data)
+		document = PyPdfParser().parse(raw_data)
+		self.assertEqual(document.id, "doc1")
+		self.assertEqual(document.metadata.page_count, 1)
 
 	def test_parse_document_returns_none_on_failure(self):
 		"""parse_document returns (doc_id, None) instead of raising."""
@@ -101,12 +84,6 @@ class TestPDF(unittest.TestCase):
 			document = PyPdfParser().parse(self.make_raw_data("a.pdf", pdf_bytes))
 		self.assertEqual(document.metadata.author, "Bob")
 		self.assertIsNone(document.metadata.creation_date)
-
-	def test_bad_page_does_not_lose_document(self):
-		"""A page that fails to extract is given as an empty page."""
-		with self.assertLogs("doc_ingest", level="WARNING"):
-			page_texts = PyPdfParser().extract_page_texts(FakeReader(["good page", ValueError("broken")]))
-		self.assertEqual(page_texts, ["good page", ""])
 
 
 PYPDFIUM2_IS_INSTALLED = importlib.util.find_spec("pypdfium2") is not None
@@ -157,11 +134,12 @@ class TestPyPdfium2(unittest.TestCase):
 		with self.assertRaises(ValueError):
 			PyPdfium2Parser().parse(raw_data)
 
-	def test_rejects_encrypted_pdf(self):
-		"""An encrypted PDF raises ValueError, even one that opens without a password."""
+	def test_parses_encrypted_pdf(self):
+		"""An encrypted PDF that opens without a password is parsed, like in LangChain."""
 		raw_data = self.make_raw_data("locked.pdf", helpers.make_encrypted_pdf())
-		with self.assertRaisesRegex(ValueError, "encrypted PDF"):
-			PyPdfium2Parser().parse(raw_data)
+		document = PyPdfium2Parser().parse(raw_data)
+		self.assertEqual(document.id, "doc1")
+		self.assertEqual(document.metadata.page_count, 1)
 
 	def test_bad_date_is_none(self):
 		"""A date that cannot be parsed becomes None; the rest is kept."""

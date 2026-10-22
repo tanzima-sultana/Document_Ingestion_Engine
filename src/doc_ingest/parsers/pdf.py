@@ -1,22 +1,24 @@
 """
 pdf.py
 
-Implements Parser for PDF documents with two interchangeable libraries:
-PyPdfParser (pypdf, the default) and PyPdfium2Parser (pypdfium2, an
-optional install). Both subclass PdfParser, which runs the same parse
-flow for every library (read bytes, open, page texts, properties, close,
-build the Document), so the output format never depends on which one
-is used; only the extracted text can differ. Each subclass only fills in
-the library calls: opening (non-PDF and encrypted files are skipped),
-closing, reading one page's text and reading the raw properties.
+Implements Parser for PDF documents with two interchangeable LangChain
+parsers: PyPdfParser (LangChain's PyPDFParser, pypdf, the default) and
+PyPdfium2Parser (LangChain's PyPDFium2Parser, pypdfium2, an optional
+install). Both subclass PdfParser, which runs the same parse flow for
+every library (read bytes, read the pages with LangChain, page texts,
+properties, build the Document), so the output format never depends on
+which one is used; only the extracted text can differ. Each subclass only
+chooses the LangChain parser. Non-PDF files are skipped; encrypted and
+broken files are handled the way LangChain handles them.
 """
 
 import abc
 import datetime
-import io
 import logging
 
-import pypdf
+from langchain_community.document_loaders.parsers.pdf import PyPDFParser
+from langchain_community.document_loaders.parsers.pdf import PyPDFium2Parser
+from langchain_core.documents.base import Blob
 
 from doc_ingest.parsers.base import Parser
 from doc_ingest.schema import Document
@@ -43,7 +45,7 @@ class PdfParser(Parser):
 		"""
 		Input: raw_data - the PDF's doc_id, doc_type, raw_path (its saved raw file) and source_path.
 		Output: a Document with cleaned text and metadata; Document.id is raw_data.doc_id, not recomputed.
-		What it does: opens the PDF once, extracts the page texts and properties, closes it and builds the Document. Raises ValueError for a non-PDF or encrypted file.
+		What it does: reads the PDF's pages once with LangChain, takes the page texts and properties and builds the Document. Raises ValueError for a non-PDF file.
 		"""
 		raw_bytes = self.read_pdf_bytes(raw_data)
 
@@ -74,7 +76,7 @@ class PdfParser(Parser):
 
 	def extract_page_texts(self, pdf) -> list[str]:
 		"""
-		Input: pdf - the open PDF (from open_pdf). Output: the raw text of each page, in page order.
+		Input: pdf - the PDF's pages (from open_pdf). Output: the raw text of each page, in page order.
 		A page whose text cannot be extracted is logged and given as "", so one bad page does not lose the document.
 		"""
 		page_texts = []
@@ -90,7 +92,7 @@ class PdfParser(Parser):
 
 	def read_pdf_properties(self, pdf) -> tuple:
 		"""
-		Input: pdf - the open PDF (from open_pdf).
+		Input: pdf - the PDF's pages (from open_pdf).
 		Output: (title, author, creation_datetime) as stored in the PDF; each can be None.
 		A creation date that cannot be parsed is logged and given as None; the title and author are kept.
 		"""
@@ -129,14 +131,19 @@ class PdfParser(Parser):
 
 	def parse_pdf_date(self, date_text: str | None) -> datetime.datetime | None:
 		"""
-		Input: date_text - a PDF date such as "D:20240301101500+01'00'", or None/"".
+		Input: date_text - a date as LangChain gives it ("2024-03-01T10:15:00+01:00"), a PDF date such as "D:20240301101500+01'00'", or None/"".
 		Output: the date as a datetime (with time zone when the text has one), or None if there is no date.
-		What it does: follows the same steps as pypdf's own date parsing; both PDF parsers use it, so they give the same creation_date. Raises ValueError if the text is not a date.
+		What it does: LangChain turns a PDF date it can read into ISO 8601 text and leaves other dates as stored, so ISO is tried first, then the same steps as pypdf's own date parsing. Raises ValueError if the text is not a date.
 		"""
 		if date_text is None:
 			return None
 		if date_text == "":
 			return None
+
+		try:
+			return datetime.datetime.fromisoformat(date_text)
+		except ValueError:
+			pass
 
 		text = date_text
 		if text[0].isdigit():
@@ -175,185 +182,73 @@ class PdfParser(Parser):
 
 		raise ValueError("Can not convert date: " + date_text)
 
+	def close_pdf(self, pages: list) -> None:
+		"""
+		Input: pages - the LangChain page Documents (from open_pdf). Output: none.
+		Nothing to free: LangChain closes the PDF itself after reading it.
+		"""
+		return None
+
+	def get_page_count(self, pages: list) -> int:
+		"""
+		Input: pages - the LangChain page Documents (from open_pdf). Output: the number of pages.
+		"""
+		return len(pages)
+
+	def extract_page_text(self, pages: list, page_index: int) -> str:
+		"""
+		Input: pages - the LangChain page Documents (from open_pdf); page_index - the page, from 0.
+		Output: the page's raw text.
+		"""
+		return pages[page_index].page_content
+
+	def read_raw_properties(self, pages: list) -> tuple:
+		"""
+		Input: pages - the LangChain page Documents (from open_pdf).
+		Output: (title, author, raw_creation_date) as text; each can be None.
+		LangChain puts the PDF's properties into every page's metadata, so the first page's are used.
+		"""
+		if len(pages) == 0:
+			return None, None, None
+
+		page_metadata = pages[0].metadata
+		title = page_metadata.get("title")
+		author = page_metadata.get("author")
+		raw_creation_date = page_metadata.get("creationdate")
+		return title, author, raw_creation_date
+
 	@abc.abstractmethod
-	def open_pdf(self, raw_bytes: bytes):
+	def open_pdf(self, raw_bytes: bytes) -> list:
 		"""
 		Input: raw_bytes - the PDF's bytes.
-		Output: the open PDF, as the library's own object.
-		What it does: opens the PDF with the library. Raises ValueError("encrypted PDF") for an encrypted PDF.
-		"""
-		raise NotImplementedError
-
-	@abc.abstractmethod
-	def close_pdf(self, pdf) -> None:
-		"""
-		Input: pdf - the open PDF (from open_pdf). Output: none.
-		What it does: frees what the library holds for the open PDF.
-		"""
-		raise NotImplementedError
-
-	@abc.abstractmethod
-	def get_page_count(self, pdf) -> int:
-		"""
-		Input: pdf - the open PDF (from open_pdf). Output: its number of pages.
-		"""
-		raise NotImplementedError
-
-	@abc.abstractmethod
-	def extract_page_text(self, pdf, page_index: int) -> str:
-		"""
-		Input: pdf - the open PDF (from open_pdf); page_index - the page, from 0.
-		Output: the page's raw text. Raises if the text cannot be extracted.
-		"""
-		raise NotImplementedError
-
-	@abc.abstractmethod
-	def read_raw_properties(self, pdf) -> tuple:
-		"""
-		Input: pdf - the open PDF (from open_pdf).
-		Output: (title, author, raw_creation_date) as text stored in the PDF; each can be None.
+		Output: the PDF's pages as LangChain Documents, one per page, read by the subclass's LangChain parser.
 		"""
 		raise NotImplementedError
 
 
 class PyPdfParser(PdfParser):
-	"""Parser for native text PDFs using pypdf."""
+	"""Parser for native text PDFs using LangChain's PyPDFParser (pypdf)."""
 
 	parser_name = "pypdf"
 
-	def open_pdf(self, raw_bytes: bytes) -> pypdf.PdfReader:
+	def open_pdf(self, raw_bytes: bytes) -> list:
 		"""
-		Input: raw_bytes - the PDF's bytes. Output: a pypdf reader of the PDF.
-		Raises ValueError for an encrypted PDF.
+		Input: raw_bytes - the PDF's bytes. Output: the PDF's pages as LangChain Documents.
 		"""
-		reader = pypdf.PdfReader(io.BytesIO(raw_bytes))
-
-		# Encrypted PDFs are skipped for now
-		if reader.is_encrypted:
-			raise ValueError("encrypted PDF")
-
-		return reader
-
-	def close_pdf(self, reader: pypdf.PdfReader) -> None:
-		"""
-		Input: reader - pypdf reader of the PDF. Output: none.
-		Nothing to free: the reader reads from bytes in memory.
-		"""
-		return None
-
-	def get_page_count(self, reader: pypdf.PdfReader) -> int:
-		"""
-		Input: reader - pypdf reader of the PDF. Output: its number of pages.
-		"""
-		return len(reader.pages)
-
-	def extract_page_text(self, reader: pypdf.PdfReader, page_index: int) -> str:
-		"""
-		Input: reader - pypdf reader of the PDF; page_index - the page, from 0.
-		Output: the page's raw text.
-		"""
-		page = reader.pages[page_index]
-		page_text = page.extract_text()
-		return page_text
-
-	def read_raw_properties(self, reader: pypdf.PdfReader) -> tuple:
-		"""
-		Input: reader - pypdf reader of the PDF.
-		Output: (title, author, raw_creation_date) as text; each can be None.
-		A PDF without document information gives all three as None.
-		"""
-		pdf_information = reader.metadata
-		if pdf_information is None:
-			return None, None, None
-
-		title = self.read_text_property(pdf_information, "/Title")
-		author = self.read_text_property(pdf_information, "/Author")
-		raw_creation_date = self.read_text_property(pdf_information, "/CreationDate")
-		return title, author, raw_creation_date
-
-	def read_text_property(self, pdf_information: pypdf.DocumentInformation, property_key: str) -> str | None:
-		"""
-		Input: pdf_information - the PDF's document information; property_key - e.g. "/Author".
-		Output: the property as text, or None if it is missing or not text.
-		Some PDFs store a property as a reference to another object; it is followed here (pypdf's .author and .creation_date do not), so pypdf finds the same values as pypdfium2.
-		"""
-		property_value = pdf_information.get(property_key)
-		if property_value is None:
-			return None
-
-		property_value = property_value.get_object()
-		if isinstance(property_value, pypdf.generic.TextStringObject):
-			return str(property_value)
-		if isinstance(property_value, pypdf.generic.ByteStringObject):
-			return str(property_value)
-		return None
+		langchain_parser = PyPDFParser()
+		pages = langchain_parser.parse(Blob.from_data(raw_bytes))
+		return pages
 
 
 class PyPdfium2Parser(PdfParser):
-	"""Parser for native text PDFs using pypdfium2 (optional install: pip install doc-ingest[pdfium])."""
+	"""Parser for native text PDFs using LangChain's PyPDFium2Parser (pypdfium2, optional install: pip install doc-ingest[pdfium])."""
 
 	parser_name = "pypdfium2"
 
-	def open_pdf(self, raw_bytes: bytes):
+	def open_pdf(self, raw_bytes: bytes) -> list:
 		"""
-		Input: raw_bytes - the PDF's bytes. Output: an open pypdfium2.PdfDocument.
-		Raises ValueError for an encrypted PDF, like PyPdfParser: both one that needs a password and one that opens without it.
+		Input: raw_bytes - the PDF's bytes. Output: the PDF's pages as LangChain Documents.
 		"""
-		# Imported here so pypdfium2 is only needed when this parser is chosen
-		import pypdfium2
-		import pypdfium2.raw as pdfium_c
-
-		# A PDF that needs a password cannot be opened at all
-		try:
-			pdf_document = pypdfium2.PdfDocument(raw_bytes)
-		except pypdfium2.PdfiumError as open_error:
-			error_code = getattr(open_error, "err_code", None)
-			if error_code == pdfium_c.FPDF_ERR_PASSWORD:
-				raise ValueError("encrypted PDF")
-			raise
-
-		# Same rule as pypdf: skip every encrypted PDF, also those that open without a password.
-		# The security handler revision is -1 only for a PDF without encryption.
-		security_handler_revision = pdfium_c.FPDF_GetSecurityHandlerRevision(pdf_document.raw)
-		if security_handler_revision != -1:
-			pdf_document.close()
-			raise ValueError("encrypted PDF")
-
-		return pdf_document
-
-	def close_pdf(self, pdf_document) -> None:
-		"""
-		Input: pdf_document - an open pypdfium2.PdfDocument. Output: none.
-		Closes it, freeing the memory pdfium holds for it.
-		"""
-		pdf_document.close()
-
-	def get_page_count(self, pdf_document) -> int:
-		"""
-		Input: pdf_document - an open pypdfium2.PdfDocument. Output: its number of pages.
-		"""
-		return len(pdf_document)
-
-	def extract_page_text(self, pdf_document, page_index: int) -> str:
-		"""
-		Input: pdf_document - an open pypdfium2.PdfDocument; page_index - the page, from 0.
-		Output: the page's raw text.
-		"""
-		page = pdf_document[page_index]
-		text_page = page.get_textpage()
-		page_text = text_page.get_text_bounded()
-		text_page.close()
-		page.close()
-		return page_text
-
-	def read_raw_properties(self, pdf_document) -> tuple:
-		"""
-		Input: pdf_document - an open pypdfium2.PdfDocument.
-		Output: (title, author, raw_creation_date) as text; each can be None.
-		"""
-		pdf_information = pdf_document.get_metadata_dict()
-
-		title = pdf_information.get("Title")
-		author = pdf_information.get("Author")
-		raw_creation_date = pdf_information.get("CreationDate")
-		return title, author, raw_creation_date
+		langchain_parser = PyPDFium2Parser()
+		pages = langchain_parser.parse(Blob.from_data(raw_bytes))
+		return pages
