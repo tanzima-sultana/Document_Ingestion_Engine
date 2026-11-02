@@ -48,8 +48,8 @@ src/doc_ingest/
 	__init__.py          # public API 
 	__main__.py          # CLI
 	ingest.py            # orchestrator
-	settings.py          # DownloadSettings / ProcessSettings / ParserSettings
-	schema.py            # Document, Metadata
+	settings.py          # Settings / FetchSettings / ParseSettings / ProcessSettings.
+	schema.py            # Document, Page, DocumentType.
 	validate.py          # input + settings checks
 	summary.py           # run Summary
 	error.py             # IngestError, describe_error
@@ -57,13 +57,12 @@ src/doc_ingest/
 	fetching/               # Handles raw row data and produces RawDocuemnt
 		__init__.py
 		document_type.py 	# Supported document type
-		dataset_info.py     # Dataset config
 		records.py      	# Each row record
 		fetcher.py      	# Fetcher base class
 		local.py         	# Local input documents 
 		huggingface.py      # huggingface documents
 
-	parsers/             	# Parses RawDocuemnt and produces ParsedDocument
+	parsing/             	# Parses RawDocuemnt and produces ParsedDocument
 		__init__.py
 		parser.py           # Parser base class
 		pdf.py
