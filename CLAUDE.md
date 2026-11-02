@@ -54,42 +54,40 @@ src/doc_ingest/
 	summary.py           # run Summary
 	error.py             # IngestError, describe_error
 
-	dataset/             # where documents come from
+	fetching/               # Handles raw row data and produces RawDocuemnt
 		__init__.py
-		config.py        # dataset config
-		hf.py            # huggingface dataset config
-		local.py         # local dataset config
-		raw_data.py      # RawData, RawDataFetcher (download + batches)
-		document_type.py # detect document type from extension/bytes
+		document_type.py 	# Supported document type
+		dataset_info.py     # Dataset config
+		records.py      	# Each row record
+		fetcher.py      	# Fetcher base class
+		local.py         	# Local input documents 
+		huggingface.py      # huggingface documents
 
-	processing/          # after parsing
+	parsers/             	# Parses RawDocuemnt and produces ParsedDocument
 		__init__.py
-		text_cleanup.py
-		metadata.py
-		dedup.py
-
-	parsers/             # raw document -> Document
-		__init__.py
-		base.py          # Abstract base class Parser : Parser, get_parser, parse_document, timeout
+		parser.py           # Parser base class
 		pdf.py
-	
+
+	processing/          	# Processed ParsedDocument and produces final Document
+		__init__.py
+		processor.py        # Processor base class
+		text_cleanup.py		# Cleans texts
+		dedup.py			# De-duplicator
 
 	tests/                       
 
+	data/
+		<dataset_name>_<size>
 	benchmarks/
+		download.py
 		pdf/
-			download.py
 			langchain.py
 			config.yaml
 			run.sh
-			data/    
-				<dataset_name>_<size>/  
+
 		docx/
-			download.py
 			langchain.py
 			config.yaml
-			run.sh  	
-		    data/ 
-				<dataset_name>_<size>/           
+			run.sh  	   
 	logs/                        
 ```

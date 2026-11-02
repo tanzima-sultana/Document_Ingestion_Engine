@@ -5,4 +5,3 @@ __pycache__/
 docs/
 logs/
 doc_ingest.egg-info/
-benchmarks/*/data/

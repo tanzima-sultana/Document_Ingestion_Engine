@@ -1,7 +1,7 @@
 """
 __main__.py
 
-Command line entry point: python -m doc_ingest --size N --input_path PATH
+Command line entry point: python -m doc_ingest --path PATH --size N --document_type pdf
 or python -m doc_ingest --config_path config.yaml (run.sh does this).
 """
 
@@ -16,36 +16,24 @@ import yaml
 
 from doc_ingest.ingest import ingest_documents
 from doc_ingest.error import IngestError
-from doc_ingest.summary import summary_to_dict
 from doc_ingest.settings import DEFAULT_DEDUP_THRESHOLD
-from doc_ingest.settings import DEFAULT_DOWNLOAD_WORKERS
-from doc_ingest.settings import DEFAULT_HUGGING_FACE_SPLIT
-from doc_ingest.settings import DEFAULT_MAX_BATCH_ROWS
 from doc_ingest.settings import DEFAULT_PARSE_TIMEOUT_SECONDS
-from doc_ingest.settings import DEFAULT_PDF_PARSER
-from doc_ingest.settings import PDF_PARSER_NAMES
-from doc_ingest.settings import DownloadSettings
-from doc_ingest.settings import ProcessSettings
-from doc_ingest.settings import ParserSettings
+from doc_ingest.settings import Settings
 
 # Keys a config file may set: top-level keys, then each settings group and its keys.
 # Every key has the same name as its command line option.
-CONFIG_TOP_LEVEL_KEYS = ["size", "input_path"]
+CONFIG_TOP_LEVEL_KEYS = ["path", "size", "document_type"]
 CONFIG_GROUP_KEYS = {
-	"download_settings": ["download_workers", "max_batch_rows", "hugging_face_split"],
-	"process_settings": ["parse_workers", "dedup_threshold"],
-	"parser_settings": ["pdf_parser", "parse_timeout_seconds"],
+	"settings": ["dedup_threshold", "timeout_seconds"],
 }
 
 
 def load_config_file(config_path: str) -> dict:
 	"""
 	Input: config_path - path of a YAML config file (see config.yaml at the repo root).
-	Output: a flat dict of option name -> value, e.g. {"size": 5000, "download_workers": 64}.
-	What it does: reads the file and checks that every key inside a settings group is a known option.
-		A top-level key that is not a doc_ingest option (e.g. a benchmark's "langchain" group) is skipped with a note,
-		so one config file can be shared with other tools. Raises ValueError with a readable message if the file is
-		missing, is not valid YAML, or a settings group has an unknown key.
+	Output: a flat dict of option name -> value, e.g. {"size": 5000, "timeout_seconds": 120}.
+	What it does: reads the file and checks that every key is a known option. Raises ValueError with a readable
+		message if the file is missing, is not valid YAML, or has an unknown key.
 	"""
 	try:
 		with open(config_path, encoding="utf-8") as config_file:
@@ -68,8 +56,7 @@ def load_config_file(config_path: str) -> dict:
 			continue
 
 		if key not in CONFIG_GROUP_KEYS:
-			print("Config key " + repr(key) + " is not a doc_ingest option, skipped.")
-			continue
+			raise ValueError("unknown key in config file: " + repr(key))
 
 		# A group with nothing under it sets nothing
 		if value is None:
@@ -90,16 +77,16 @@ def parse_args(argument_list):
 	Input:
 		argument_list - list of command line strings, usually sys.argv[1:].
 	Output:
-		argparse.Namespace with config_path, size, input_path, and every
-		download, process and parser setting.
+		argparse.Namespace with config_path, path, size, document_type and
+		every setting.
 	What it does:
 		Reads the command line options. With --config_path, the values in
 		that config file are used first; an option typed on the command
 		line still wins, and anything set in neither uses the library
-		default. size and input_path must be set in one of the two; every
-		setting is optional and shown in its own --help group. Stops with
-		an error message if size or input_path is missing, the config file
-		is bad, or a number option is not a number.
+		default. path, size and document_type must be set in one of the
+		two; every setting is optional and shown in the --help settings
+		group. Stops with an error message if one of them is missing, the
+		config file is bad, or a number option is not a number.
 	"""
 	argument_parser = argparse.ArgumentParser(
 		description="Ingest documents into clean, deduplicated JSON."
@@ -110,7 +97,13 @@ def parse_args(argument_list):
 		default=None,
 		help="YAML file with the options below; options typed on the command line override it.",
 	)
-	# Not required=True here: size and input_path may come from the config file instead (checked below)
+	# Not required=True here: these may come from the config file instead (checked below)
+	argument_parser.add_argument(
+		"--path",
+		type=str,
+		default=None,
+		help="Local file or folder to read documents from (required, here or in the config file).",
+	)
 	argument_parser.add_argument(
 		"--size",
 		type=int,
@@ -118,56 +111,21 @@ def parse_args(argument_list):
 		help="Maximum number of documents to process (required, here or in the config file).",
 	)
 	argument_parser.add_argument(
-		"--input_path",
+		"--document_type",
 		type=str,
 		default=None,
-		help="Local path, or Hugging Face dataset name (or its page URL), to read documents from (required, here or in the config file).",
+		help="Type of document to keep, e.g. pdf; other documents are discarded (required, here or in the config file).",
 	)
 
-	download_group = argument_parser.add_argument_group("download settings")
-	download_group.add_argument(
-		"--download_workers",
-		type=int,
-		default=DEFAULT_DOWNLOAD_WORKERS,
-		help="Number of documents downloaded/decoded at the same time (default: %(default)s).",
-	)
-	download_group.add_argument(
-		"--max_batch_rows",
-		type=int,
-		default=DEFAULT_MAX_BATCH_ROWS,
-		help="Most rows read in one batch; limits memory use (default: %(default)s).",
-	)
-	download_group.add_argument(
-		"--hugging_face_split",
-		type=str,
-		default=DEFAULT_HUGGING_FACE_SPLIT,
-		help="Split read from a Hugging Face dataset (default: %(default)s).",
-	)
-
-	process_group = argument_parser.add_argument_group("process settings")
-	process_group.add_argument(
-		"--parse_workers",
-		type=int,
-		default=None,
-		help="Number of documents parsed at the same time (default: number of CPU cores).",
-	)
-	process_group.add_argument(
+	settings_group = argument_parser.add_argument_group("settings")
+	settings_group.add_argument(
 		"--dedup_threshold",
 		type=float,
 		default=DEFAULT_DEDUP_THRESHOLD,
 		help="Similarity at or above which two documents are near-duplicates (default: %(default)s).",
 	)
-
-	parser_group = argument_parser.add_argument_group("parser settings")
-	parser_group.add_argument(
-		"--pdf_parser",
-		type=str,
-		choices=PDF_PARSER_NAMES,
-		default=DEFAULT_PDF_PARSER,
-		help="Library that parses PDFs; pypdfium2 needs pip install pypdfium2 (default: %(default)s).",
-	)
-	parser_group.add_argument(
-		"--parse_timeout_seconds",
+	settings_group.add_argument(
+		"--timeout_seconds",
 		type=int,
 		default=DEFAULT_PARSE_TIMEOUT_SECONDS,
 		help="Longest time one document may take to parse before it is skipped (default: %(default)s).",
@@ -189,26 +147,28 @@ def parse_args(argument_list):
 
 	parsed_arguments = argument_parser.parse_args(argument_list)
 
+	if parsed_arguments.path is None:
+		argument_parser.error("path is required: pass --path or set path in the config file")
 	if parsed_arguments.size is None:
 		argument_parser.error("size is required: pass --size or set size in the config file")
-	if parsed_arguments.input_path is None:
-		argument_parser.error("input_path is required: pass --input_path or set input_path in the config file")
+	if parsed_arguments.document_type is None:
+		argument_parser.error("document_type is required: pass --document_type or set document_type in the config file")
 
 	return parsed_arguments
 
 
-def save_summary_json(summary) -> str:
+def save_summary_json(summary_values: dict) -> str:
 	"""
-	Input: summary - the run's Summary.
+	Input: summary_values - the run's summary as a dict.
 	Output: the path of the saved file, logs/summary_<date>_<time>.json in the current folder.
-	What it does: writes summary_to_dict(summary) as indented JSON, creating logs/ if needed.
+	What it does: writes it as indented JSON, creating logs/ if needed.
 	"""
 	run_time = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
 	summary_path = os.path.join("logs", "summary_" + run_time + ".json")
 	os.makedirs("logs", exist_ok=True)
 
 	with open(summary_path, "w", encoding="utf-8") as summary_file:
-		json.dump(summary_to_dict(summary), summary_file, indent=2)
+		json.dump(summary_values, summary_file, indent=2)
 	return summary_path
 
 
@@ -224,30 +184,18 @@ def main():
 	logging.getLogger("doc_ingest").setLevel(logging.INFO)
 
 	args = parse_args(sys.argv[1:])
-	size = args.size
-	input_path = args.input_path
-	download_settings = DownloadSettings(
-		download_workers=args.download_workers,
-		max_batch_rows=args.max_batch_rows,
-		hugging_face_split=args.hugging_face_split,
-	)
-	process_settings = ProcessSettings(
-		parse_workers=args.parse_workers,
+	settings = Settings(
 		dedup_threshold=args.dedup_threshold,
-	)
-	parser_settings = ParserSettings(
-		pdf_parser=args.pdf_parser,
-		parse_timeout_seconds=args.parse_timeout_seconds,
+		timeout_seconds=args.timeout_seconds,
 	)
 
 	print("Starting document ingestion")
 	if args.config_path is not None:
-		print("  config_path : " + args.config_path)
-	print("  size        : " + str(size))
-	print("  input_path  : " + input_path)
-	print("  download_settings : " + str(download_settings))
-	print("  process_settings  : " + str(process_settings))
-	print("  parser_settings   : " + str(parser_settings))
+		print("  config_path   : " + args.config_path)
+	print("  path          : " + args.path)
+	print("  size          : " + str(args.size))
+	print("  document_type : " + args.document_type)
+	print("  settings      : " + str(settings))
 
 
 	# Ingestion. ingest_documents validates the inputs first.
@@ -256,11 +204,10 @@ def main():
 	# bug or a system problem and keeps its full traceback.
 	try:
 		ingest_result = ingest_documents(
-			size,
-			input_path,
-			download_settings=download_settings,
-			process_settings=process_settings,
-			parser_settings=parser_settings,
+			args.path,
+			args.size,
+			args.document_type,
+			settings=settings,
 		)
 	except IngestError as ingestion_error:
 		sys.stdout.flush()
@@ -269,7 +216,7 @@ def main():
 
 	print("Document ingestion finished")
 
-	summary_path = save_summary_json(ingest_result.summary)
+	summary_path = save_summary_json(ingest_result.summary.to_dict())
 	print("Summary saved to " + summary_path)
 
 	# huggingface `datasets`/fsspec leaves a background thread alive after
@@ -282,6 +229,5 @@ def main():
 	os._exit(0)
 
 
-# Guard: spawned parse workers re-import this module and must not start another run
 if __name__ == "__main__":
 	main()

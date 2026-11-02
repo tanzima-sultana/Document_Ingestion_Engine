@@ -1,21 +1,11 @@
 """
 settings.py
 
-Optional settings for an ingest run, grouped by pipeline stage. Every field
-has a default, so a caller only sets what it wants to change.
+Settings for an ingest run. Settings is what the caller sets; every field has a
+default. FetchSettings, ParseSettings and ProcessSettings are what each phase uses.
 """
 
 import dataclasses
-
-# Default number of documents downloaded/decoded at the same time
-DEFAULT_DOWNLOAD_WORKERS = 64
-
-# Default largest number of rows read in one batch, so a large request does
-# not hold every document's bytes in memory at once
-DEFAULT_MAX_BATCH_ROWS = 256
-
-# Default split read from a Hugging Face dataset
-DEFAULT_HUGGING_FACE_SPLIT = "train"
 
 # Default longest time one document may take to parse before it is skipped
 DEFAULT_PARSE_TIMEOUT_SECONDS = 120
@@ -23,39 +13,38 @@ DEFAULT_PARSE_TIMEOUT_SECONDS = 120
 # Default Jaccard similarity at or above which two documents are near-duplicates
 DEFAULT_DEDUP_THRESHOLD = 0.90
 
-# PDF parsing libraries that can be chosen, and the default one.
-# pypdfium2 is an optional install (pip install doc-ingest[pdfium]).
-PDF_PARSER_NAMES = ["pypdf", "pypdfium2"]
-DEFAULT_PDF_PARSER = "pypdf"
+
+@dataclasses.dataclass
+class Settings:
+	"""
+	What the caller sets: dedup_threshold - near-duplicate similarity;
+	timeout_seconds - parse time limit per document. The code splits it into the classes below.
+	"""
+	dedup_threshold: float = DEFAULT_DEDUP_THRESHOLD
+	timeout_seconds: int = DEFAULT_PARSE_TIMEOUT_SECONDS
 
 
 @dataclasses.dataclass
-class DownloadSettings:
+class FetchSettings:
 	"""
-	How the source is read: download_workers - rows downloaded/decoded at the same time;
-	max_batch_rows - most rows read per batch; hugging_face_split - split read from a Hugging Face dataset.
+	Internal. How a source is read: document_type - the type to keep.
 	"""
-	download_workers: int = DEFAULT_DOWNLOAD_WORKERS
-	max_batch_rows: int = DEFAULT_MAX_BATCH_ROWS
-	hugging_face_split: str = DEFAULT_HUGGING_FACE_SPLIT
+	document_type: str
+
+
+@dataclasses.dataclass
+class ParseSettings:
+	"""
+	Internal. How documents are parsed: document_type - decides which parser is used;
+	timeout_seconds - time limit per document.
+	"""
+	document_type: str
+	timeout_seconds: int = DEFAULT_PARSE_TIMEOUT_SECONDS
 
 
 @dataclasses.dataclass
 class ProcessSettings:
 	"""
-	How raw files become kept documents: parse_workers - parse processes (None: one per CPU core);
-	dedup_threshold - near-duplicate similarity.
+	Internal. How parsed documents are processed: dedup_threshold - near-duplicate similarity.
 	"""
-	parse_workers: int | None = None
 	dedup_threshold: float = DEFAULT_DEDUP_THRESHOLD
-
-
-@dataclasses.dataclass
-class ParserSettings:
-	"""
-	How each document is parsed: pdf_parser - "pypdf" (default) or "pypdfium2";
-	parse_timeout_seconds - time limit per document.
-	Every pdf_parser choice produces the same Document format; only the extracted text can differ.
-	"""
-	pdf_parser: str = DEFAULT_PDF_PARSER
-	parse_timeout_seconds: int = DEFAULT_PARSE_TIMEOUT_SECONDS

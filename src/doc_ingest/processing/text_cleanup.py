@@ -1,12 +1,14 @@
 """
 processing/text_cleanup.py
 
-Cleans a document's text: strips repeated headers/footers and collapses
-repeated whitespace and blank lines. Works on plain text from any format;
-each parser extracts its own page texts and passes them in.
+Cleans a document's text page by page: strips repeated headers/footers and
+collapses repeated whitespace and blank lines. Works on plain text from any
+format; each parser extracts its own page texts and passes them in.
 """
 
 import re
+
+from doc_ingest.error import fix_broken_characters
 
 
 # A first/last line is a header/footer if it repeats on this fraction of pages
@@ -21,11 +23,11 @@ ICON_CHARACTERS_PATTERN = re.compile("[\ue000-\uf8ff\U000f0000-\U0010ffff]")
 DIGITS_PATTERN = re.compile(r"\d+")
 
 
-def clean_text(page_texts: list[str]) -> str:
+def clean_page_texts(page_texts: list[str]) -> list[str]:
 	"""
-	Input: the text of each page (or section) of a document. Output: its cleaned text.
-	Removes icon characters and extra whitespace from each line, drops
-	header/footer lines and repeated blank lines, joins pages with a blank line.
+	Input: the text of each page (or section) of a document.
+	Output: the cleaned text of each page, in the same order; a page with nothing left is "", so page positions stay correct.
+	Removes icon characters and extra whitespace from each line, and drops header/footer lines and repeated blank lines.
 	"""
 	pages_lines = []
 	for page_text in page_texts:
@@ -40,7 +42,7 @@ def clean_text(page_texts: list[str]) -> str:
 
 	header_footer_keys = find_header_footer_keys(pages_lines)
 
-	page_texts = []
+	cleaned_page_texts = []
 	for page_lines in pages_lines:
 		kept_lines = []
 		for line in page_lines:
@@ -54,21 +56,31 @@ def clean_text(page_texts: list[str]) -> str:
 
 		page_text = "\n".join(kept_lines)
 		page_text = page_text.strip()
-		if page_text != "":
-			page_texts.append(page_text)
+		cleaned_page_texts.append(page_text)
 
-	return "\n\n".join(page_texts)
+	return cleaned_page_texts
 
 
-def fix_broken_characters(text: str) -> str:
+def clean_property_text(value) -> str | None:
 	"""
-	Input: text. Output: the same text, safe to save as UTF-8.
-	Text extractors such as pypdf can return a character split into two halves (a UTF-16
-	surrogate pair, e.g. math letters); pairs are joined back, lone halves become "\ufffd".
+	Input: value - a property value as stored in the document, or None.
+	Output: the value as stripped text, or None if it is missing or blank.
+	What it does: turns the value into a string, fixes broken characters
+		(fix_broken_characters), strips whitespace and null characters from
+		its ends, and treats an empty result as missing.
 	"""
-	text_bytes = text.encode("utf-16-le", "surrogatepass")
-	fixed_text = text_bytes.decode("utf-16-le", "replace")
-	return fixed_text
+	if value is None:
+		return None
+
+	text = str(value)
+	text = fix_broken_characters(text)
+	text = text.strip()
+	text = text.strip("\x00")
+	text = text.strip()
+	if text == "":
+		return None
+
+	return text
 
 
 def find_header_footer_keys(pages_lines: list[list[str]]) -> set[str]:

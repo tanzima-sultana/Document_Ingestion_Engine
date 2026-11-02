@@ -1,41 +1,33 @@
 """
-Tests for summary.py: groups, rates worked out from counts and times, and None when there is nothing to divide by.
+Tests for summary.py: groups and saving as JSON.
 """
 
 import json
 import unittest
 
-from doc_ingest.settings import DownloadSettings
+from doc_ingest.settings import Settings
 from doc_ingest.summary import Summary
-from doc_ingest.summary import summary_to_dict
 
 
 class TestSummary(unittest.TestCase):
 
-	def test_rates(self):
-		"""Rates come from the counts and times; worker rates from each document's own parse time."""
+	def test_groups(self):
+		"""Counts, settings and the total time are in their groups."""
 		summary = Summary()
-		summary.download_settings = DownloadSettings(download_workers=4)
-		summary.pages = 10
-		summary.parse_seconds = 2.0
-		summary.document_parse_seconds = [1.0, 2.0, 3.0, 4.0]
+		summary.settings = Settings(timeout_seconds=30)
+		summary.total_parsed = 4
+		summary.total_seconds = 2.5
 
-		summary_dict = summary_to_dict(summary)
-		self.assertEqual(summary_dict["counts"]["documents_parsed"], 4)
-		self.assertEqual(summary_dict["settings"]["download_settings"]["download_workers"], 4)
-		self.assertIsNone(summary_dict["settings"]["parser_settings"])
-		self.assertEqual(summary_dict["rates"]["documents_per_second"], 2.0)
-		self.assertEqual(summary_dict["rates"]["ms_per_page"], 200.0)
-		self.assertEqual(summary_dict["rates"]["worker_ms_per_page"], 1000.0)
-		self.assertEqual(summary_dict["rates"]["worker_median_ms_per_document"], 2500.0)
-		self.assertEqual(summary_dict["rates"]["worker_p95_ms_per_document"], 4000.0)
+		summary_dict = summary.to_dict()
+		self.assertEqual(summary_dict["parsing"]["total_parsed"], 4)
+		self.assertEqual(summary_dict["settings"]["timeout_seconds"], 30)
+		self.assertEqual(summary_dict["run"]["total_seconds"], 2.5)
+		self.assertNotIn("rates", summary_dict)
+		self.assertNotIn("time", summary_dict)
 
 	def test_empty_summary(self):
-		"""With nothing parsed, every rate is None and the dict can still be saved as JSON."""
-		summary_dict = summary_to_dict(Summary())
-		for rate_value in summary_dict["rates"].values():
-			self.assertIsNone(rate_value)
-		json.dumps(summary_dict)
+		"""An empty summary can still be saved as JSON."""
+		json.dumps(Summary().to_dict())
 
 
 if __name__ == "__main__":

@@ -5,12 +5,11 @@ End-to-end tests for ingest_documents on a local folder of generated PDFs.
 import os
 import tempfile
 import unittest
+import unittest.mock
 
 import helpers
 from doc_ingest.error import IngestError
 from doc_ingest.ingest import ingest_documents
-from doc_ingest.settings import DownloadSettings
-from doc_ingest.settings import ProcessSettings
 
 
 class TestIngestDocuments(unittest.TestCase):
@@ -36,10 +35,9 @@ class TestIngestDocuments(unittest.TestCase):
 		"""Runs ingest_documents quietly; returns (documents, logged output)."""
 		with self.assertLogs("doc_ingest", level="INFO") as captured_logs:
 			ingest_result = ingest_documents(
-				size,
 				self.input_folder,
-				download_settings=DownloadSettings(download_workers=2),
-				process_settings=ProcessSettings(parse_workers=2),
+				size,
+				"pdf",
 			)
 		logged_output = "\n".join(captured_logs.output)
 		return ingest_result.documents, logged_output
@@ -50,7 +48,7 @@ class TestIngestDocuments(unittest.TestCase):
 
 		sources = []
 		for document in documents:
-			sources.append(os.path.basename(document.metadata.source))
+			sources.append(os.path.basename(document.source))
 		sources.sort()
 		self.assertEqual(sources, ["a_report.pdf", "c_weather.pdf", "d_memo.pdf"])
 
@@ -59,6 +57,18 @@ class TestIngestDocuments(unittest.TestCase):
 		self.assertIn("parse_failed: 1", printed_output)
 		self.assertIn("no_text: 2", printed_output)
 		self.assertIn("duplicates: 1", printed_output)
+
+	def test_returned_documents_are_cleaned(self):
+		"""The three phases run: returned pages have no running header, and page numbers are kept."""
+		documents, printed_output = self.run_ingest(20)
+		report = None
+		for document in documents:
+			if os.path.basename(document.source) == "a_report.pdf":
+				report = document
+
+		self.assertNotIn("Quarterly Report", report.text)
+		self.assertEqual(len(report.pages), 4)
+		self.assertEqual(report.pages[3].number, 4)
 
 	def list_temporary_ingest_folders(self):
 		"""Returns the names of doc_ingest's temporary folders in the system temp folder."""
@@ -86,8 +96,36 @@ class TestIngestDocuments(unittest.TestCase):
 		temporary_folders_before = self.list_temporary_ingest_folders()
 
 		with self.assertRaises(IngestError):
-			ingest_documents(0, self.input_folder)
+			ingest_documents(self.input_folder, 0, "pdf")
 		self.assertEqual(self.list_temporary_ingest_folders(), temporary_folders_before)
+
+	def test_progress_is_logged(self):
+		"""A progress line is logged as documents are kept."""
+		with unittest.mock.patch("doc_ingest.ingest.PROGRESS_INTERVAL", 2):
+			documents, printed_output = self.run_ingest(20)
+		self.assertIn("Kept 2 of 20 document(s).", printed_output)
+
+	def test_wrong_type_is_discarded_and_counted(self):
+		"""A file of another type is not returned; it is counted as wrong_doc_type."""
+		helpers.write_file(self.input_folder, "notes.txt", b"not a pdf")
+		documents, printed_output = self.run_ingest(20)
+		self.assertEqual(len(documents), 3)
+		self.assertIn("wrong_doc_type: 1", printed_output)
+
+	def test_size_tops_up_past_skipped_files(self):
+		"""Rows are read until size documents are kept, past copies and files of another type."""
+		helpers.write_file(self.input_folder, "a_a_notes.txt", b"not a pdf")
+		documents, printed_output = self.run_ingest(2)
+		self.assertEqual(len(documents), 2)
+
+	def test_rejected_inputs(self):
+		"""A web URL, a Hugging Face name and an unsupported type all stop the run."""
+		with self.assertRaises(IngestError):
+			ingest_documents("https://x.com/a.pdf", 5, "pdf")
+		with self.assertRaises(IngestError):
+			ingest_documents("owner/name", 5, "pdf")
+		with self.assertRaises(IngestError):
+			ingest_documents(self.input_folder, 5, "docx")
 
 
 if __name__ == "__main__":

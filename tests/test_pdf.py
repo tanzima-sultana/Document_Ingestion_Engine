@@ -1,20 +1,17 @@
 """
-Tests for parsers/pdf.py, parsers/base.py and processing/metadata.py on generated PDFs.
+Tests for parsing/pdf.py and parsing/parser.py on generated PDFs.
 """
 
-import hashlib
-import importlib.util
 import tempfile
 import unittest
 
 import helpers
-from doc_ingest.processing.metadata import extract_metadata
-from doc_ingest.parsers.base import parse_document
-from doc_ingest.parsers.pdf import PyPdfParser
-from doc_ingest.parsers.pdf import PyPdfium2Parser
-from doc_ingest.settings import ParserSettings
-from doc_ingest.dataset.raw_data import RawData
-from doc_ingest.schema import DocumentType
+from doc_ingest.fetching.fetcher import RawDocument
+from doc_ingest.parsing.parser import BaseParser
+from doc_ingest.parsing.parser import ParsedDocument
+from doc_ingest.parsing.parser import get_parser_class
+from doc_ingest.parsing.pdf import PdfParser
+from doc_ingest.settings import ParseSettings
 
 
 class TestPDF(unittest.TestCase):
@@ -26,165 +23,79 @@ class TestPDF(unittest.TestCase):
 	def tearDown(self):
 		self.temporary_folder.cleanup()
 
-	def make_raw_data(self, file_name, content):
-		"""Writes content to a file and returns a RawData for it."""
+	def make_raw_document(self, file_name, content):
+		"""Writes content to a file and returns a RawDocument for it."""
 		raw_path = helpers.write_file(self.root, file_name, content)
-		return RawData("doc1", "pdf", raw_path, "source/" + file_name)
+		return RawDocument("doc1", "pdf", raw_path, "source/" + file_name)
 
 	def test_parses_pdf(self):
-		"""A text PDF becomes a Document with cleaned text and metadata."""
-		raw_data = self.make_raw_data("report.pdf", helpers.make_report_pdf("finance", 4))
-		document = PyPdfParser().parse(raw_data)
-		self.assertEqual(document.id, "doc1")
-		self.assertEqual(document.type, DocumentType.PDF)
-		self.assertIn("talks about finance", document.text)
-		self.assertNotIn("Quarterly Report", document.text)
-		self.assertEqual(document.metadata.title, "finance report")
-		self.assertEqual(document.metadata.author, "Tester")
-		self.assertEqual(document.metadata.source, "source/report.pdf")
+		"""A text PDF becomes a ParsedDocument with raw page text; headers are still there."""
+		raw_document = self.make_raw_document("report.pdf", helpers.make_report_pdf("finance", 4))
+		parsed_document = PdfParser.parse(raw_document)
+		self.assertEqual(parsed_document.id, "doc1")
+		self.assertEqual(parsed_document.type, "pdf")
+		self.assertIn("talks about finance", parsed_document.raw_texts[0])
+		self.assertIn("Quarterly Report", parsed_document.raw_texts[0])
+		self.assertEqual(parsed_document.title, "finance report")
+		self.assertEqual(parsed_document.source, "source/report.pdf")
+		self.assertEqual(len(parsed_document.raw_texts), 4)
+
+	def test_empty_page_keeps_its_place(self):
+		"""An empty page stays in raw_texts, so the pages after it keep their positions."""
+		pdf_bytes = helpers.make_pdf([["first words"], [], ["third words"]], {})
+		parsed_document = PdfParser.parse(self.make_raw_document("a.pdf", pdf_bytes))
+		self.assertEqual(len(parsed_document.raw_texts), 3)
+		self.assertIn("first words", parsed_document.raw_texts[0])
+		self.assertEqual(parsed_document.raw_texts[1].strip(), "")
+		self.assertIn("third words", parsed_document.raw_texts[2])
 
 	def test_rejects_non_pdf(self):
-		"""A file that is not a PDF raises ValueError."""
-		raw_data = self.make_raw_data("fake.pdf", b"this is not a pdf")
-		with self.assertRaises(ValueError):
-			PyPdfParser().parse(raw_data)
+		"""A file that is not a PDF raises an error."""
+		raw_document = self.make_raw_document("fake.pdf", b"this is not a pdf")
+		with self.assertRaises(Exception):
+			PdfParser.parse(raw_document)
 
 	def test_parses_encrypted_pdf(self):
 		"""An encrypted PDF that opens without a password is parsed, like in LangChain."""
-		raw_data = self.make_raw_data("locked.pdf", helpers.make_encrypted_pdf())
-		document = PyPdfParser().parse(raw_data)
-		self.assertEqual(document.id, "doc1")
-		self.assertEqual(document.metadata.page_count, 1)
+		raw_document = self.make_raw_document("locked.pdf", helpers.make_encrypted_pdf())
+		parsed_document = PdfParser.parse(raw_document)
+		self.assertEqual(parsed_document.id, "doc1")
+		self.assertEqual(len(parsed_document.raw_texts), 1)
+
+	def test_parse_document_returns_parsed_document(self):
+		"""parse_document returns a ParsedDocument and counts it."""
+		raw_document = self.make_raw_document("a.pdf", helpers.make_pdf([["hello"]], {}))
+		parser = BaseParser(ParseSettings(document_type="pdf", timeout_seconds=30))
+		parsed_document = parser.parse_document(raw_document)
+		self.assertIsInstance(parsed_document, ParsedDocument)
+		self.assertEqual(parsed_document.id, "doc1")
+		self.assertEqual(parser.summary.total_parsed, 1)
+		self.assertEqual(parser.summary.parse_success, 1)
 
 	def test_parse_document_returns_none_on_failure(self):
-		"""parse_document returns (doc_id, None) instead of raising."""
-		raw_data = self.make_raw_data("fake.pdf", b"this is not a pdf")
-		doc_id, document, parse_seconds = parse_document(raw_data)
-		self.assertEqual(doc_id, "doc1")
-		self.assertIsNone(document)
+		"""On failure parse_document returns None; nothing is raised."""
+		raw_document = self.make_raw_document("fake.pdf", b"this is not a pdf")
+		parser = BaseParser(ParseSettings(document_type="pdf"))
+		self.assertIsNone(parser.parse_document(raw_document))
+		self.assertEqual(parser.summary.parse_failed, 1)
 
-	def test_parse_document_unknown_type(self):
-		"""A type with no parser returns None."""
-		raw_path = helpers.write_file(self.root, "a.docx", b"PK")
-		doc_id, document, parse_seconds = parse_document(RawData("doc2", "docx", raw_path, "a.docx"))
-		self.assertIsNone(document)
-
-	def test_pdf_properties(self):
-		"""Title, author and creation date are read from the PDF."""
-		pdf_bytes = helpers.make_pdf([["hello"]], {"Title": " My Title ", "Author": "Jane", "CreationDate": "D:20240301101500+00'00'"})
-		document = PyPdfParser().parse(self.make_raw_data("a.pdf", pdf_bytes))
-		self.assertEqual(document.metadata.title, "My Title")
-		self.assertEqual(document.metadata.author, "Jane")
-		self.assertEqual(document.metadata.creation_date, "2024-03-01T10:15:00+00:00")
-
-	def test_bad_date_is_none(self):
-		"""A date pypdf cannot parse becomes None; the rest is kept."""
-		pdf_bytes = helpers.make_pdf([["hello"]], {"Author": "Bob", "CreationDate": "garbage"})
-		with self.assertLogs("doc_ingest", level="WARNING"):
-			document = PyPdfParser().parse(self.make_raw_data("a.pdf", pdf_bytes))
-		self.assertEqual(document.metadata.author, "Bob")
-		self.assertIsNone(document.metadata.creation_date)
-
-
-PYPDFIUM2_IS_INSTALLED = importlib.util.find_spec("pypdfium2") is not None
-
-
-@unittest.skipUnless(PYPDFIUM2_IS_INSTALLED, "pypdfium2 is not installed")
-class TestPyPdfium2(unittest.TestCase):
-
-	def setUp(self):
-		self.temporary_folder = tempfile.TemporaryDirectory()
-		self.root = self.temporary_folder.name
-
-	def tearDown(self):
-		self.temporary_folder.cleanup()
-
-	def make_raw_data(self, file_name, content):
-		"""Writes content to a file and returns a RawData for it."""
-		raw_path = helpers.write_file(self.root, file_name, content)
-		return RawData("doc1", "pdf", raw_path, "source/" + file_name)
-
-	def test_same_metadata_as_pypdf(self):
-		"""Both parsers give the same metadata (apart from the parser name) and the same cleaned text."""
-		pdf_bytes = helpers.make_pdf([["hello"]], {"Title": " My Title ", "Author": "Jane", "CreationDate": "D:20240301101500+00'00'"})
-		raw_data = self.make_raw_data("a.pdf", pdf_bytes)
-		pypdf_document = PyPdfParser().parse(raw_data)
-		pypdfium2_document = PyPdfium2Parser().parse(raw_data)
-
-		self.assertEqual(pypdf_document.metadata.parser, "pypdf")
-		self.assertEqual(pypdfium2_document.metadata.parser, "pypdfium2")
-		pypdf_metadata = pypdf_document.metadata.model_dump(exclude={"parser"})
-		pypdfium2_metadata = pypdfium2_document.metadata.model_dump(exclude={"parser"})
-		self.assertEqual(pypdf_metadata, pypdfium2_metadata)
-		self.assertEqual(pypdf_document.text, pypdfium2_document.text)
-
-	def test_parses_report(self):
-		"""A multi-page report is parsed and cleaned like with pypdf."""
-		raw_data = self.make_raw_data("report.pdf", helpers.make_report_pdf("finance", 4))
-		document = PyPdfium2Parser().parse(raw_data)
-		self.assertEqual(document.id, "doc1")
-		self.assertEqual(document.type, DocumentType.PDF)
-		self.assertIn("talks about finance", document.text)
-		self.assertNotIn("Quarterly Report", document.text)
-		self.assertEqual(document.metadata.page_count, 4)
-
-	def test_rejects_non_pdf(self):
-		"""A file that is not a PDF raises ValueError."""
-		raw_data = self.make_raw_data("fake.pdf", b"this is not a pdf")
+	def test_get_parser_class(self):
+		"""The class comes from the document type; a type with no parser is refused."""
+		self.assertIs(get_parser_class("pdf"), PdfParser)
 		with self.assertRaises(ValueError):
-			PyPdfium2Parser().parse(raw_data)
+			get_parser_class("docx")
 
-	def test_parses_encrypted_pdf(self):
-		"""An encrypted PDF that opens without a password is parsed, like in LangChain."""
-		raw_data = self.make_raw_data("locked.pdf", helpers.make_encrypted_pdf())
-		document = PyPdfium2Parser().parse(raw_data)
-		self.assertEqual(document.id, "doc1")
-		self.assertEqual(document.metadata.page_count, 1)
+	def test_unknown_type_gives_no_document(self):
+		"""A type with no parser returns None; nothing is raised."""
+		raw_path = helpers.write_file(self.root, "a.pdf", helpers.make_pdf([["hello"]], {}))
+		parser = BaseParser(ParseSettings(document_type="docx"))
+		self.assertIsNone(parser.parse_document(RawDocument("doc2", "docx", raw_path, raw_path)))
 
-	def test_bad_date_is_none(self):
-		"""A date that cannot be parsed becomes None; the rest is kept."""
-		pdf_bytes = helpers.make_pdf([["hello"]], {"Author": "Bob", "CreationDate": "garbage"})
-		with self.assertLogs("doc_ingest", level="WARNING"):
-			document = PyPdfium2Parser().parse(self.make_raw_data("a.pdf", pdf_bytes))
-		self.assertEqual(document.metadata.author, "Bob")
-		self.assertIsNone(document.metadata.creation_date)
-
-	def test_parse_document_uses_chosen_parser(self):
-		"""parse_document uses the PDF parser chosen in ParserSettings."""
-		raw_data = self.make_raw_data("a.pdf", helpers.make_pdf([["hello"]], {}))
-		doc_id, document, parse_seconds = parse_document(raw_data, parser_settings=ParserSettings(pdf_parser="pypdfium2"))
-		self.assertEqual(document.metadata.parser, "pypdfium2")
-
-
-class TestParsePdfDate(unittest.TestCase):
-
-	def test_date_formats(self):
-		"""PDF dates become the same datetimes pypdf gives."""
-		parse_pdf_date = PyPdfParser().parse_pdf_date
-		self.assertEqual(parse_pdf_date("D:20240301101500+00'00'").isoformat(), "2024-03-01T10:15:00+00:00")
-		self.assertEqual(parse_pdf_date("D:20200129160534Z").isoformat(), "2020-01-29T16:05:34+00:00")
-		self.assertEqual(parse_pdf_date("D:20240301101500+05'30'").isoformat(), "2024-03-01T10:15:00+05:30")
-		self.assertEqual(parse_pdf_date("D:20240301").isoformat(), "2024-03-01T00:00:00")
-		self.assertIsNone(parse_pdf_date(""))
-		self.assertIsNone(parse_pdf_date(None))
-		with self.assertRaises(ValueError):
-			parse_pdf_date("garbage")
-
-
-class TestMetadata(unittest.TestCase):
-
-	def test_generic_metadata(self):
-		"""Source, size and hash are set; properties are left for the parser."""
-		pdf_bytes = helpers.make_pdf([["hello"]], {"Title": "My Title", "Author": "Jane"})
-		raw_data = RawData("doc1", "pdf", "raw/doc1.pdf", "data/a.pdf")
-		metadata = extract_metadata(raw_data, pdf_bytes)
-		self.assertEqual(metadata.source, "data/a.pdf")
-		self.assertEqual(metadata.file_size_bytes, len(pdf_bytes))
-		self.assertEqual(metadata.content_hash, hashlib.sha256(pdf_bytes).hexdigest())
-		self.assertIsNone(metadata.title)
-		self.assertIsNone(metadata.author)
-		self.assertIsNone(metadata.creation_date)
-		self.assertIsNone(metadata.minhash_signature)
+	def test_pdf_title(self):
+		"""The title is read from the PDF."""
+		pdf_bytes = helpers.make_pdf([["hello"]], {"Title": "My Title"})
+		parsed_document = PdfParser.parse(self.make_raw_document("a.pdf", pdf_bytes))
+		self.assertEqual(parsed_document.title, "My Title")
 
 
 if __name__ == "__main__":

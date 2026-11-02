@@ -1,10 +1,9 @@
 """
-dataset/hf.py
+fetching/huggingface.py
 
 Hugging Face datasets: recognizing a dataset name or dataset page URL,
 reading the first row and the row count, and turning hf:// file paths into
-download requests. URLs are only accepted as Hugging Face dataset pages or
-files, so the URL helpers live here too.
+download requests.
 """
 
 import logging
@@ -12,15 +11,14 @@ import os
 import re
 import urllib.parse
 import urllib.request
+from typing import Iterator
+
+from doc_ingest.error import describe_error
+from doc_ingest.fetching.records import HUGGING_FACE_FILE_PREFIX
+from doc_ingest.fetching.records import is_url
 
 logger = logging.getLogger(__name__)
 
-
-# URL schemes that mark a value as a web link.
-URL_SCHEMES = [
-	"http",
-	"https",
-]
 
 # Seconds to wait for a document link to respond before giving up.
 URL_TIMEOUT_SECONDS = 30
@@ -44,32 +42,6 @@ HUGGING_FACE_DATASET_PAGE_SUFFIXES = [
 	"tree",
 	"viewer",
 ]
-
-# Value of DatasetConfig.format for a Hugging Face dataset, which is a set
-# of records rather than files with one extension.
-HUGGING_FACE_FORMAT = "hf"
-
-# Start of the path of a file stored in a Hugging Face dataset repository.
-HUGGING_FACE_FILE_PREFIX = "hf://datasets/"
-
-
-def is_url(path) -> bool:
-	"""
-	Input: a dataset path string, or a content value of a record.
-	Output: True if it is an http or https URL with a host name, otherwise
-	False.
-	What it does: parses the string, checks its scheme against URL_SCHEMES,
-	and checks that a host name is present (so "https://" alone is not a
-	URL).
-	"""
-	parsed_path = urllib.parse.urlparse(path)
-	if parsed_path.scheme not in URL_SCHEMES:
-		return False
-
-	if parsed_path.netloc == "":
-		return False
-
-	return True
 
 
 def is_hugging_face_dataset(path) -> bool:
@@ -265,3 +237,42 @@ def get_hugging_face_row_count(dataset_name, hugging_face_split: str) -> int:
 		return -1
 
 	return row_count
+
+
+def iterate_hugging_face_rows(dataset_name, hugging_face_split: str) -> Iterator:
+	"""
+	Input: a Hugging Face dataset name and the split to read.
+	Output: an iterator of row dicts, one per dataset row. A row that
+		cannot be unwrapped is logged and given as None, so it still
+		counts as read.
+	What it does: opens the dataset in streaming mode, so rows are
+		downloaded as they are read.
+	"""
+	# Imported here so local datasets do not pay the import cost.
+	from datasets import load_dataset
+
+	dataset = load_dataset(dataset_name, split=hugging_face_split, streaming=True)
+	# Keep file columns (e.g. Pdf) as raw bytes instead of opening them
+	dataset = dataset.decode(False)
+
+	for row in dataset:
+		try:
+			unwrapped_row = unwrap_file_values(row)
+		except Exception as error:
+			logger.warning("Skipping row: could not be read: %s", describe_error(error))
+			unwrapped_row = None
+		yield unwrapped_row
+
+
+def download_hugging_face_file(hf_path) -> bytes:
+	"""
+	Input: hf_path - "hf://datasets/..." path of one Hugging Face file.
+	Output: the downloaded bytes.
+	What it does: downloads the whole file from its Hugging Face download
+		URL. Raises urllib.error.URLError (or a subclass) if the download
+		fails, or if the server does not respond within URL_TIMEOUT_SECONDS.
+	"""
+	download_url = get_hugging_face_file_url(hf_path)
+	request = build_url_request(download_url, "GET", {})
+	with urllib.request.urlopen(request, timeout=URL_TIMEOUT_SECONDS) as response:
+		return response.read()

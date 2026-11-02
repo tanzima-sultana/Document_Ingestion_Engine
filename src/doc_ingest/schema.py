@@ -5,34 +5,32 @@ from pydantic import BaseModel, Field
 
 class DocumentType(str, Enum):
 	"""
-	The supported document types. There is one value per parser in parsers/.
+	The supported document types. There is one value per parser in parsing/.
 	Each value is a plain string, so it is saved in the output JSON as text,
 	for example "pdf".
 	"""
 	PDF = "pdf"
-	SCANNED_PDF = "scanned_pdf"
-	DOCX = "docx"
-	PPTX = "pptx"
-	XLSX = "xlsx"
-	CSV = "csv"
-	HTML = "html"
-	MD = "md"
-	TXT = "txt"
 
 
-class Metadata(BaseModel):
-	source: str = Field(..., description="Original input file path or URL")
-	file_size_bytes: int = Field(..., ge=0, description="Size of the raw input file")
-	content_hash: str = Field(..., description="SHA-256 hash of raw bytes for exact deduplication")
-	minhash_signature: list[int] | None = Field(None, description="MinHash/LSH signature")
-	page_count: int | None = Field(None, ge=0, description="Number of pages (None for types without pages)")
-	parser: str | None = Field(None, description="Library that extracted the text (e.g., pypdf, pypdfium2)")
-	author: str | None = None
-	title: str | None = None
-	creation_date: str | None = None
+class Page(BaseModel):
+	number: int = Field(..., ge=1, description="Page number as shown in the document, starting from 1")
+	text: str = Field(..., description="Cleaned text of the page (empty for a page with no text)")
+
 
 class Document(BaseModel):
 	id: str = Field(..., description="Unique identifier derived from content hash")
-	type: DocumentType = Field(..., description="Detected document type (e.g., pdf, docx)")
-	text: str = Field(..., description="Cleaned full text content of the document")
-	metadata: Metadata = Field(..., description="Document-level metadata")
+	type: DocumentType = Field(..., description="Document type (e.g., pdf)")
+	source: str = Field(..., description="Original input file path or URL")
+	title: str | None = Field(None, description="Document title, if it has one")
+	pages: list[Page] = Field(..., description="Cleaned text of each page, in page order")
+
+	@property
+	def text(self) -> str:
+		"""
+		Input: none. Output: the text of the non-empty pages, joined with a blank line.
+		"""
+		page_texts = []
+		for page in self.pages:
+			if page.text != "":
+				page_texts.append(page.text)
+		return "\n\n".join(page_texts)

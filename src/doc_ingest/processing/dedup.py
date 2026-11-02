@@ -1,8 +1,9 @@
 """
 processing/dedup.py
 
-Finds exact duplicates (same content hash) and near-duplicates (MinHash
-signatures with LSH) among the documents kept in a run.
+Finds exact duplicates (same document id, which comes from the raw bytes)
+and near-duplicates (MinHash signatures with LSH) among the documents kept
+in a run.
 """
 
 import datasketch
@@ -10,16 +11,14 @@ from doc_ingest.schema import Document
 from doc_ingest.settings import DEFAULT_DEDUP_THRESHOLD
 
 NUM_PERM = 128
-# Hashing scheme of every MinHash. Named explicitly so a signature saved in the cache is rebuilt with the
-# scheme it was made with (datasketch's default for new MinHashes since 2.0).
+# Hashing scheme of every MinHash (datasketch's default for new MinHashes since 2.0).
 MINHASH_SCHEME = "affine32"
 _SHINGLE_SIZE = 5
 
 class Deduplicator:
 	"""
-	Holds the content hashes and MinHash LSH index of every document kept
-	so far in a run, so each new document can be checked against all of
-	them.
+	Holds the ids and MinHash LSH index of every document kept so far in
+	a run, so each new document can be checked against all of them.
 	"""
 
 	def __init__(self, threshold: float = DEFAULT_DEDUP_THRESHOLD):
@@ -27,10 +26,10 @@ class Deduplicator:
 		Input: threshold - Jaccard similarity at or above which two
 			documents are near-duplicates (see make_lsh_index).
 		Output: none.
-		What it does: starts with no seen content hashes and an empty LSH
+		What it does: starts with no seen document ids and an empty LSH
 			index.
 		"""
-		self.seen_content_hashes = set()
+		self.seen_document_ids = set()
 		self.lsh_index = self.make_lsh_index(threshold)
 
 	def make_minhash(self, shingles: set) -> datasketch.MinHash:
@@ -70,7 +69,7 @@ class Deduplicator:
 		What it does: splits text into whitespace-separated words and builds
 			the set of overlapping word n-grams (shingles) of length
 			_SHINGLE_SIZE. Two documents can share many shingles, and so be
-			near duplicates, even when their content_hash values differ.
+			near duplicates, even when their ids differ.
 		"""
 		words = text.split()
 
@@ -84,15 +83,15 @@ class Deduplicator:
 
 		return shingles
 
-	def is_exact_duplicate(self, content_hash: str) -> bool:
+	def is_exact_duplicate(self, document_id: str) -> bool:
 		"""
-		Input: content_hash - the content_hash of the document being
-			checked.
-		Output: True if content_hash was already seen, else False.
-		What it does: checks whether a kept document has the same content
-			hash, meaning this document is an exact duplicate of it.
+		Input: document_id - the id of the document being checked.
+		Output: True if document_id was already seen, else False.
+		What it does: checks whether a kept document has the same id,
+			meaning the same raw bytes, so this document is an exact
+			duplicate of it.
 		"""
-		return content_hash in self.seen_content_hashes
+		return document_id in self.seen_document_ids
 
 	def is_near_duplicate(self, minhash: datasketch.MinHash) -> bool:
 		"""
@@ -106,53 +105,15 @@ class Deduplicator:
 		candidate_doc_ids = self.lsh_index.query(minhash)
 		return len(candidate_doc_ids) > 0
 
-	def add(self, document: Document) -> None:
-		"""
-		Input: document - a Document already known to be kept.
-		Output: none.
-		What it does: records the document's content hash and MinHash
-			without checking it. Used for documents loaded from the cache.
-			The MinHash saved in the document is reused when it is usable,
-			so a resumed run does not compute it again.
-		"""
-		self.seen_content_hashes.add(document.metadata.content_hash)
-
-		minhash = self.load_stored_minhash(document)
-		if minhash is None:
-			shingles = self.make_shingles(document.text)
-			if len(shingles) == 0:
-				return
-			minhash = self.make_minhash(shingles)
-
-		self.lsh_index.insert(document.id, minhash)
-
-	def load_stored_minhash(self, document: Document) -> datasketch.MinHash | None:
-		"""
-		Input: document - a Document, usually loaded from the cache.
-		Output: a MinHash built from document.metadata.minhash_signature, or None if there is none or
-			it does not have NUM_PERM values (e.g. saved before NUM_PERM changed), so it must be computed.
-		"""
-		stored_signature = document.metadata.minhash_signature
-		if stored_signature is None:
-			return None
-
-		if len(stored_signature) != NUM_PERM:
-			return None
-
-		minhash = datasketch.MinHash(num_perm=NUM_PERM, hashvalues=stored_signature, scheme=MINHASH_SCHEME)
-		return minhash
-
 	def add_if_new(self, document: Document) -> bool:
 		"""
 		Input: document - a newly parsed Document.
 		Output: True if the document was new and recorded, or False if it
 			is a duplicate.
 		What it does: checks the document against every kept document. If
-			it is not an exact or near duplicate, records it as kept and
-			stores its MinHash signature in
-			document.metadata.minhash_signature.
+			it is not an exact or near duplicate, records it as kept.
 		"""
-		if self.is_exact_duplicate(document.metadata.content_hash):
+		if self.is_exact_duplicate(document.id):
 			return False
 
 		shingles = self.make_shingles(document.text)
@@ -162,22 +123,7 @@ class Deduplicator:
 			if self.is_near_duplicate(minhash):
 				return False
 
-		self.seen_content_hashes.add(document.metadata.content_hash)
+		self.seen_document_ids.add(document.id)
 		if minhash is not None:
 			self.lsh_index.insert(document.id, minhash)
-			self.store_minhash_signature(document, minhash)
 		return True
-
-	def store_minhash_signature(self, document: Document, minhash: datasketch.MinHash) -> None:
-		"""
-		Input: document - the Document whose signature is stored;
-			minhash - that document's MinHash signature (see make_minhash).
-		Output: none.
-		What it does: copies the signature's NUM_PERM hash values into
-			document.metadata.minhash_signature as plain Python ints, so
-			they can be saved to JSON.
-		"""
-		signature_values = []
-		for hash_value in minhash.hashvalues:
-			signature_values.append(int(hash_value))
-		document.metadata.minhash_signature = signature_values
