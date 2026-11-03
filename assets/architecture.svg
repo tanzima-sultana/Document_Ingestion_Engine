@@ -1,0 +1,80 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="640" viewBox="0 0 1000 640" font-family="DejaVu Sans, Helvetica, Arial, sans-serif">
+	<defs>
+		<marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+			<path d="M 0 0 L 10 5 L 0 10 z" fill="#475569"/>
+		</marker>
+	</defs>
+
+	<rect x="0" y="0" width="1000" height="640" fill="#ffffff"/>
+
+	<!-- Box 1: doc_ingest -->
+	<rect x="150" y="30" width="700" height="250" rx="14" fill="#eff6ff" stroke="#2563eb" stroke-width="2"/>
+	<text x="500" y="62" text-anchor="middle" font-size="20" font-weight="bold" fill="#1e3a8a">doc_ingest</text>
+	<text x="500" y="84" text-anchor="middle" font-size="13" fill="#1e3a8a">one document at a time, until the requested size is reached</text>
+
+	<rect x="175" y="105" width="200" height="150" rx="10" fill="#ffffff" stroke="#2563eb" stroke-width="1.5"/>
+	<text x="275" y="137" text-anchor="middle" font-size="16" font-weight="bold" fill="#1e293b">Fetching</text>
+	<text x="275" y="170" text-anchor="middle" font-size="13" fill="#334155">Reads files or records</text>
+	<text x="275" y="190" text-anchor="middle" font-size="13" fill="#334155">Keeps only the</text>
+	<text x="275" y="210" text-anchor="middle" font-size="13" fill="#334155">requested type</text>
+
+	<rect x="400" y="105" width="200" height="150" rx="10" fill="#ffffff" stroke="#2563eb" stroke-width="1.5"/>
+	<text x="500" y="137" text-anchor="middle" font-size="16" font-weight="bold" fill="#1e293b">Parsing</text>
+	<text x="500" y="170" text-anchor="middle" font-size="13" fill="#334155">Extracts the text</text>
+	<text x="500" y="190" text-anchor="middle" font-size="13" fill="#334155">of each page with</text>
+	<text x="500" y="210" text-anchor="middle" font-size="13" fill="#334155">the type's parser</text>
+
+	<rect x="625" y="105" width="200" height="150" rx="10" fill="#ffffff" stroke="#2563eb" stroke-width="1.5"/>
+	<text x="725" y="137" text-anchor="middle" font-size="16" font-weight="bold" fill="#1e293b">Processing</text>
+	<text x="725" y="170" text-anchor="middle" font-size="13" fill="#334155">Cleans the text</text>
+	<text x="725" y="190" text-anchor="middle" font-size="13" fill="#334155">Drops empty documents</text>
+	<text x="725" y="210" text-anchor="middle" font-size="13" fill="#334155">Removes duplicates</text>
+
+	<line x1="375" y1="180" x2="391" y2="180" stroke="#475569" stroke-width="2"/>
+	<polygon points="390,175 399,180 390,185" fill="#475569"/>
+	<line x1="600" y1="180" x2="616" y2="180" stroke="#475569" stroke-width="2"/>
+	<polygon points="615,175 624,180 615,185" fill="#475569"/>
+
+	<!-- Input and output of doc_ingest -->
+	<text x="75" y="175" text-anchor="middle" font-size="14" font-weight="bold" fill="#1e293b">Raw files</text>
+	<line x1="110" y1="180" x2="166" y2="180" stroke="#475569" stroke-width="2"/>
+	<polygon points="165,175 174,180 165,185" fill="#475569"/>
+
+	<line x1="825" y1="180" x2="866" y2="180" stroke="#475569" stroke-width="2"/>
+	<polygon points="865,175 874,180 865,185" fill="#475569"/>
+	<text x="930" y="165" text-anchor="middle" font-size="14" font-weight="bold" fill="#1e293b">Documents</text>
+	<text x="930" y="185" text-anchor="middle" font-size="12" fill="#334155">+ summary</text>
+	<text x="930" y="203" text-anchor="middle" font-size="12" fill="#334155">+ sources read</text>
+
+	<path d="M 930 215 L 930 300 L 500 300 L 500 336" fill="none" stroke="#475569" stroke-width="2"/>
+	<polygon points="495,335 500,344 505,335" fill="#475569"/>
+
+	<!-- Box 2: Evaluation -->
+	<rect x="150" y="345" width="700" height="250" rx="14" fill="#f0fdf4" stroke="#16a34a" stroke-width="2"/>
+	<text x="500" y="377" text-anchor="middle" font-size="20" font-weight="bold" fill="#14532d">Evaluation</text>
+	<text x="500" y="399" text-anchor="middle" font-size="13" fill="#14532d">scored against an independent Textract reference, side by side with LangChain</text>
+
+	<rect x="170" y="420" width="155" height="120" rx="10" fill="#ffffff" stroke="#16a34a" stroke-width="1.5"/>
+	<text x="247" y="450" text-anchor="middle" font-size="15" font-weight="bold" fill="#1e293b">Text accuracy</text>
+	<text x="247" y="480" text-anchor="middle" font-size="12" fill="#334155">Recall, precision,</text>
+	<text x="247" y="498" text-anchor="middle" font-size="12" fill="#334155">F1, WER, CER</text>
+
+	<rect x="340" y="420" width="155" height="120" rx="10" fill="#ffffff" stroke="#16a34a" stroke-width="1.5"/>
+	<text x="417" y="450" text-anchor="middle" font-size="15" font-weight="bold" fill="#1e293b">Cleanup</text>
+	<text x="417" y="480" text-anchor="middle" font-size="12" fill="#334155">Boilerplate removed,</text>
+	<text x="417" y="498" text-anchor="middle" font-size="12" fill="#334155">content lost</text>
+
+	<rect x="510" y="420" width="155" height="120" rx="10" fill="#ffffff" stroke="#16a34a" stroke-width="1.5"/>
+	<text x="587" y="450" text-anchor="middle" font-size="15" font-weight="bold" fill="#1e293b">Metadata</text>
+	<text x="587" y="480" text-anchor="middle" font-size="12" fill="#334155">Source, page count,</text>
+	<text x="587" y="498" text-anchor="middle" font-size="12" fill="#334155">page numbers,</text>
+	<text x="587" y="516" text-anchor="middle" font-size="12" fill="#334155">citations, title</text>
+
+	<rect x="680" y="420" width="155" height="120" rx="10" fill="#ffffff" stroke="#16a34a" stroke-width="1.5"/>
+	<text x="757" y="450" text-anchor="middle" font-size="15" font-weight="bold" fill="#1e293b">Dedup</text>
+	<text x="757" y="480" text-anchor="middle" font-size="12" fill="#334155">Exact and near</text>
+	<text x="757" y="498" text-anchor="middle" font-size="12" fill="#334155">copies caught,</text>
+	<text x="757" y="516" text-anchor="middle" font-size="12" fill="#334155">false matches</text>
+
+	<text x="500" y="575" text-anchor="middle" font-size="13" fill="#14532d">→ one side-by-side report per run</text>
+</svg>

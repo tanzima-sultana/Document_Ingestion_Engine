@@ -94,6 +94,8 @@ Document(
 
 ## Architecture
 
+![Architecture](assets/architecture.svg)
+
 ## Evaluation
 
 ## Results
