@@ -10,6 +10,7 @@ import argparse
 import json
 import os
 
+import cleanup_quality
 import text_accuracy
 
 
@@ -121,6 +122,7 @@ def main() -> None:
 		"reference_path": arguments.reference_path,
 		"matching": count_matching(reference_documents, output_documents, matched_pages),
 		"text_accuracy": text_accuracy.evaluate_text_accuracy(matched_pages),
+		"cleanup_quality": cleanup_quality.evaluate_cleanup_quality(matched_pages),
 	}
 
 	evaluation_path = os.path.join(os.path.dirname(arguments.documents_path), "evaluation.json")
