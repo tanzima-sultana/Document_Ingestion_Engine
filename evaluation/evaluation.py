@@ -35,6 +35,36 @@ def load_documents_by_source(jsonl_path: str) -> dict:
 	return documents_by_source
 
 
+def load_sources_read(sources_read_path: str) -> set[str]:
+	"""
+	Input: sources_read_path - the engine's sources_read.txt, one source per line.
+	Output: the set of sources the engine read.
+	What it does: stops with an error if the file does not exist, since the reference cannot be cut to what was read without it.
+	"""
+	if not os.path.isfile(sources_read_path):
+		raise SystemExit("sources_read.txt not found: " + sources_read_path + " (run the engine again to save it)")
+
+	sources_read = set()
+	with open(sources_read_path, encoding="utf-8") as sources_read_file:
+		for line in sources_read_file:
+			source = line.rstrip("\n")
+			if source != "":
+				sources_read.add(source)
+	return sources_read
+
+
+def keep_sources_read(reference_documents: dict, sources_read: set[str]) -> dict:
+	"""
+	Input: reference_documents - source -> {page number -> page text}; sources_read - from load_sources_read.
+	Output: only the reference documents the engine read.
+	"""
+	reference_documents_read = {}
+	for source in reference_documents:
+		if source in sources_read:
+			reference_documents_read[source] = reference_documents[source]
+	return reference_documents_read
+
+
 def match_pages(reference_documents: dict, output_documents: dict) -> list[dict]:
 	"""
 	Input: reference_documents and output_documents - each a dict of source -> {page number -> page text}.
@@ -107,14 +137,18 @@ def main() -> None:
 	"""
 	Input: --documents_path and --reference_path from the command line.
 	Output: none. Saves the results as evaluation.json next to the documents file and prints where.
-	What it does: loads both files, pairs every reference page with the engine's page, and saves the counts and scores.
+	What it does: loads both files, keeps the reference documents listed in sources_read.txt next to the documents file,
+	pairs every reference page with the engine's page, and saves the counts and scores.
 	"""
 	argument_parser = argparse.ArgumentParser(description="Evaluate one engine's output against the reference.")
 	argument_parser.add_argument("--documents_path", required=True, help="The engine's documents.jsonl")
 	argument_parser.add_argument("--reference_path", required=True, help="The reference pages.jsonl")
 	arguments = argument_parser.parse_args()
 
-	reference_documents = load_documents_by_source(arguments.reference_path)
+	# The reference covers the whole raw folder; only the documents the engine read are scored
+	sources_read_path = os.path.join(os.path.dirname(arguments.documents_path), "sources_read.txt")
+	sources_read = load_sources_read(sources_read_path)
+	reference_documents = keep_sources_read(load_documents_by_source(arguments.reference_path), sources_read)
 	output_documents = load_documents_by_source(arguments.documents_path)
 	matched_pages = match_pages(reference_documents, output_documents)
 

@@ -82,10 +82,13 @@ All commands below assume cuprrent working directory is the repo root (`DocInges
 		text_accuracy.py      	# Text accuracy: word recall, precision, F1, and word and character error rates.
 		cleanup_quality.py      # Cleanup quality: boilerplate removed and content wrongly removed.
 		dedup_quality.py        # Dedup quality: check removed pairs, known copies and false matches.
-		metadata_quality.py 	# Metadata and page numbers: check title, page_count, source, and that eachtext for citations.              
+		metadata_quality.py 	# Metadata and page numbers: check title, page_count, source, and that eachtext for citations.    
+		run.sh                  # Runs evaluation, dedup quality and the report with config.yaml
+        config.yaml             # settings for evaluation/run.sh
+          
 
 	data/
-		<dataset_name>_<size>
+		<dataset_name>
 	benchmarks/
 		download.py
 		pdf/

@@ -156,15 +156,25 @@ def parse_args(argument_list):
 	return parsed_arguments
 
 
-def save_summary_json(summary_values: dict, input_path: str) -> str:
+def make_output_folder(input_path: str, size: int) -> str:
 	"""
-	Input: summary_values - the run's summary as a dict; input_path - the file or folder the run read.
-	Output: the path of the saved file, logs/<dataset name>/doc_ingest/summary.json.
-	What it does: writes it as indented JSON, replacing the last run's file.
+	Input: input_path - the file or folder the run read; size - the number of documents asked for.
+	Output: the run's output folder, logs/<dataset name>_<size>/doc_ingest, created if it does not exist.
 	"""
 	dataset_name = os.path.basename(os.path.normpath(input_path))
-	output_folder = os.path.join("logs", dataset_name, "doc_ingest")
+	output_folder = os.path.join("logs", dataset_name + "_" + str(size), "doc_ingest")
 	os.makedirs(output_folder, exist_ok=True)
+	return output_folder
+
+
+def save_summary_json(summary_values: dict, input_path: str, size: int) -> str:
+	"""
+	Input: summary_values - the run's summary as a dict; input_path - the file or folder the run read;
+		size - the number of documents asked for.
+	Output: the path of the saved file, logs/<dataset name>_<size>/doc_ingest/summary.json.
+	What it does: writes it as indented JSON, replacing the last run's file.
+	"""
+	output_folder = make_output_folder(input_path, size)
 	summary_path = os.path.join(output_folder, "summary.json")
 
 	with open(summary_path, "w", encoding="utf-8") as summary_file:
@@ -172,15 +182,14 @@ def save_summary_json(summary_values: dict, input_path: str) -> str:
 	return summary_path
 
 
-def save_documents_jsonl(documents: list, input_path: str) -> str:
+def save_documents_jsonl(documents: list, input_path: str, size: int) -> str:
 	"""
-	Input: documents - the returned Documents; input_path - the file or folder the run read.
-	Output: the path of the saved file, logs/<dataset name>/doc_ingest/documents.jsonl.
+	Input: documents - the returned Documents; input_path - the file or folder the run read;
+		size - the number of documents asked for.
+	Output: the path of the saved file, logs/<dataset name>_<size>/doc_ingest/documents.jsonl.
 	What it does: writes one Document per line as JSON (id, type, source, title, pages), replacing the last run's file.
 	"""
-	dataset_name = os.path.basename(os.path.normpath(input_path))
-	output_folder = os.path.join("logs", dataset_name, "doc_ingest")
-	os.makedirs(output_folder, exist_ok=True)
+	output_folder = make_output_folder(input_path, size)
 	documents_path = os.path.join(output_folder, "documents.jsonl")
 
 	with open(documents_path, "w", encoding="utf-8") as documents_file:
@@ -188,6 +197,22 @@ def save_documents_jsonl(documents: list, input_path: str) -> str:
 			document_values = document.model_dump(mode="json")
 			documents_file.write(json.dumps(document_values, ensure_ascii=False) + "\n")
 	return documents_path
+
+
+def save_sources_read(sources_read: list[str], input_path: str, size: int) -> str:
+	"""
+	Input: sources_read - the source of every document the run read; input_path - the file or folder the run read;
+		size - the number of documents asked for.
+	Output: the path of the saved file, logs/<dataset name>_<size>/doc_ingest/sources_read.txt.
+	What it does: writes one source per line, replacing the last run's file.
+	"""
+	output_folder = make_output_folder(input_path, size)
+	sources_read_path = os.path.join(output_folder, "sources_read.txt")
+
+	with open(sources_read_path, "w", encoding="utf-8") as sources_read_file:
+		for source in sources_read:
+			sources_read_file.write(source + "\n")
+	return sources_read_path
 
 
 def main():
@@ -234,11 +259,14 @@ def main():
 
 	print("Document ingestion finished")
 
-	summary_path = save_summary_json(ingest_result.summary.to_dict(), args.path)
+	summary_path = save_summary_json(ingest_result.summary.to_dict(), args.path, args.size)
 	print("Summary saved to " + summary_path)
 
-	documents_path = save_documents_jsonl(ingest_result.documents, args.path)
+	documents_path = save_documents_jsonl(ingest_result.documents, args.path, args.size)
 	print("Documents saved to " + documents_path)
+
+	sources_read_path = save_sources_read(ingest_result.sources_read, args.path, args.size)
+	print("Sources read saved to " + sources_read_path)
 
 	# huggingface `datasets`/fsspec leaves a background thread alive after
 	# streaming a dataset, which crashes normal interpreter shutdown with

@@ -1,4 +1,4 @@
 # Settings for benchmarks/pdf/langchain.py. Paths are relative to the repo root.
 
-path: data/DUDE_100                  # PDF file or folder of PDFs
+path: data/DUDE                      # PDF file or folder of PDFs
 size: 100                            # most PDF files to load

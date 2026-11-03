@@ -30,10 +30,12 @@ PROGRESS_INTERVAL = 100
 @dataclasses.dataclass
 class IngestResult:
 	"""
-	What ingest_documents returns: the collected Documents and the run's Summary.
+	What ingest_documents returns: the collected Documents, the run's Summary, and the source of every
+	document the fetcher handed over (including the ones later dropped).
 	"""
 	documents: list[Document]
 	summary: Summary
+	sources_read: list[str]
 
 
 class IngestEngine:
@@ -71,12 +73,15 @@ class IngestEngine:
 
 		summary = Summary(document_type=self.document_type, documents_requested=self.size, path=self.path, settings=self.settings)
 		documents = []
+		sources_read = []
 
 		# A document that is not in a file of its own goes to this folder, which is removed when the run ends, also if it fails
 		with tempfile.TemporaryDirectory(prefix="doc_ingest_") as storage_path:
 			fetcher = self.fetcher_class(self.path, storage_path, fetch_settings)
 
 			for raw_document in fetcher.fetch_documents():
+				sources_read.append(raw_document.source)
+
 				parsed_document = parser.parse_document(raw_document)
 				if parsed_document is None:
 					continue
@@ -102,13 +107,13 @@ class IngestEngine:
 		summary.total_seconds = time.perf_counter() - run_start
 		summary.print_run_summary()
 
-		return IngestResult(documents=documents, summary=summary)
+		return IngestResult(documents=documents, summary=summary, sources_read=sources_read)
 
 
 def ingest_documents(path: str, size: int, document_type: str, *, settings: Settings | None = None) -> IngestResult:
 	"""
 	Input: path - local file or folder; size - max documents to return; document_type - the type to keep (e.g. "pdf"); settings - optional (None: all defaults).
-	Output: an IngestResult: .documents (up to size Documents) and .summary (the run's Summary).
+	Output: an IngestResult: .documents (up to size Documents), .summary (the run's Summary) and .sources_read.
 	What it does: checks the inputs, then runs the engine on a local source. Documents of another type are discarded.
 	"""
 	# None, not Settings(), as the default: a default object would be shared by every call

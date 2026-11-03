@@ -1,0 +1,15 @@
+# Settings for evaluation/run.sh. Paths are relative to the repo root.
+# The engines are run first with their own run.sh; this only scores what they saved.
+
+dataset: DUDE                                            # name of the raw data folder, data/<dataset>
+size: 50                                                 # size the engines were run with; their output is in logs/<dataset>_<size>/
+reference_path: data/DUDE_reference/pages.jsonl          # reference page text of the whole raw folder (evaluation/reference_textract.py)
+
+# Dedup quality: builds a test folder of copies, runs doc_ingest on it (settings from config.yaml at the repo root) and scores it.
+dedup:
+  enabled: true
+  output_path: data/DUDE_dedup                           # test folder, one per raw folder; built only if it does not exist yet
+  manifest_path: data/DUDE_dedup_manifest.json           # which file is which; kept outside the test folder
+  exact_copies: 20
+  near_copies: 20
+  seed: 0
