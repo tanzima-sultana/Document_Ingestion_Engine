@@ -18,7 +18,7 @@ class Summary:
 	# Run
 	document_type: str | None = None
 	path: str | None = None
-	requested_size: int = 0
+	documents_requested: int = 0
 	documents_returned: int = 0
 	source_exhausted: bool = False
 	total_seconds: float = 0.0
@@ -41,11 +41,13 @@ class Summary:
 	total_processed: int = 0
 	cleanup_success: int = 0
 	cleanup_failed: int = 0
-	no_text: int = 0
+	empty_documents: int = 0
 	duplicates: int = 0
-	duplicate_check_failed: int = 0
-	pages: int = 0
-	characters: int = 0
+	dedup_failed: int = 0
+	skipped: int = 0
+	total_pages: int = 0
+	blank_pages: int = 0
+	total_characters: int = 0
 
 	def set_fetch_summary(self, fetch_summary) -> None:
 		"""
@@ -71,11 +73,13 @@ class Summary:
 		self.total_processed = process_summary.total_processed
 		self.cleanup_success = process_summary.cleanup_success
 		self.cleanup_failed = process_summary.cleanup_failed
-		self.no_text = process_summary.no_text
+		self.empty_documents = process_summary.empty_documents
 		self.duplicates = process_summary.duplicates
-		self.duplicate_check_failed = process_summary.duplicate_check_failed
-		self.pages = process_summary.pages
-		self.characters = process_summary.characters
+		self.dedup_failed = process_summary.dedup_failed
+		self.skipped = self.cleanup_failed + self.empty_documents + self.dedup_failed + self.duplicates
+		self.total_pages = process_summary.total_pages
+		self.blank_pages = process_summary.blank_pages
+		self.total_characters = process_summary.total_characters
 
 	def to_dict(self) -> dict:
 		"""
@@ -89,7 +93,7 @@ class Summary:
 			"run": {
 				"document_type": self.document_type,
 				"path": self.path,
-				"requested_size": self.requested_size,
+				"documents_requested": self.documents_requested,
 				"documents_returned": self.documents_returned,
 				"source_exhausted": self.source_exhausted,
 				"total_seconds": round(self.total_seconds, 3),
@@ -110,21 +114,33 @@ class Summary:
 				"total_processed": self.total_processed,
 				"cleanup_success": self.cleanup_success,
 				"cleanup_failed": self.cleanup_failed,
-				"no_text": self.no_text,
+				"empty_documents": self.empty_documents,
 				"duplicates": self.duplicates,
-				"duplicate_check_failed": self.duplicate_check_failed,
-				"pages": self.pages,
-				"characters": self.characters,
+				"dedup_failed": self.dedup_failed,
+				"skipped": self.skipped,
+			},
+			"pages": {
+				"total_pages": self.total_pages,
+				"blank_pages": self.blank_pages,
+				"total_characters": self.total_characters,
 			},
 		}
 
 	def print_run_summary(self) -> None:
 		"""
 		Input: none. Output: none.
-		Logs (INFO) every group of to_dict, one "name: value" line per field.
+		Logs (INFO) every group of to_dict, one "name: value" line per field,
+		then the same lines the LangChain benchmark prints, to compare the two.
 		"""
 		logger.info("Run summary")
 		for group_name, group_values in self.to_dict().items():
 			logger.info("  %s:", group_name)
 			for field_name, field_value in group_values.items():
 				logger.info("    %s: %s", field_name, field_value)
+
+		logger.info("Compare with LangChain")
+		logger.info("  documents_requested : %s", self.documents_requested)
+		logger.info("  documents_returned  : %s", self.documents_returned)
+		logger.info("  total_pages         : %s", self.total_pages)
+		logger.info("  blank_pages         : %s", self.blank_pages)
+		logger.info("  total_characters    : %s", self.total_characters)

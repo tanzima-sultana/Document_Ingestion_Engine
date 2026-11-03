@@ -2,8 +2,8 @@
 # python -m doc_ingest. A setting left out uses the library default.
 
 # Required
-path: data/pdfs                               # local file or folder
-size: 5000
+path: data/DUDE_100                           # local file or folder
+size: 100
 document_type: pdf                            # documents of another type are discarded
 
 settings:

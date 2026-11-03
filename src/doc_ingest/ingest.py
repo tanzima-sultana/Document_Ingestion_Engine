@@ -69,7 +69,7 @@ class IngestEngine:
 		parser = BaseParser(parse_settings)
 		processor = DocumentProcessor(process_settings)
 
-		summary = Summary(document_type=self.document_type, requested_size=self.size, path=self.path, settings=self.settings)
+		summary = Summary(document_type=self.document_type, documents_requested=self.size, path=self.path, settings=self.settings)
 		documents = []
 
 		# A document that is not in a file of its own goes to this folder, which is removed when the run ends, also if it fails

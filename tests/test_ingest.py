@@ -52,10 +52,10 @@ class TestIngestDocuments(unittest.TestCase):
 		sources.sort()
 		self.assertEqual(sources, ["a_report.pdf", "c_weather.pdf", "d_memo.pdf"])
 
-		self.assertIn("requested_size: 20", printed_output)
+		self.assertIn("documents_requested: 20", printed_output)
 		self.assertIn("documents_returned: 3", printed_output)
 		self.assertIn("parse_failed: 1", printed_output)
-		self.assertIn("no_text: 2", printed_output)
+		self.assertIn("empty_documents: 2", printed_output)
 		self.assertIn("duplicates: 1", printed_output)
 
 	def test_returned_documents_are_cleaned(self):

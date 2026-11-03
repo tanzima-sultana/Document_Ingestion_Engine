@@ -24,25 +24,18 @@ logger = logging.getLogger(__name__)
 @dataclasses.dataclass
 class ProcessSummary:
 	"""
-	What processing did so far.
-
-	total_processed: parsed documents processed.
-	cleanup_success: documents cleaned.
-	cleanup_failed: documents that failed to clean.
-	no_text: cleaned documents with no text, e.g. a scanned PDF.
-	duplicates: exact or near duplicates of a kept document.
-	duplicate_check_failed: documents whose duplicate check failed.
-	pages: pages of the cleaned documents.
-	characters: characters of the cleaned documents.
+	Counts of what processing did: documents processed, dropped and returned,
+	and the pages and characters of the returned documents.
 	"""
 	total_processed: int = 0
 	cleanup_success: int = 0
 	cleanup_failed: int = 0
-	no_text: int = 0
+	empty_documents: int = 0
 	duplicates: int = 0
-	duplicate_check_failed: int = 0
-	pages: int = 0
-	characters: int = 0
+	dedup_failed: int = 0
+	total_pages: int = 0
+	blank_pages: int = 0
+	total_characters: int = 0
 
 
 class DocumentProcessor:
@@ -75,25 +68,29 @@ class DocumentProcessor:
 			return None
 
 		self.summary.cleanup_success += 1
-		self.summary.pages += len(document.pages)
-		self.summary.characters += len(document.text)
 
 		# No text, e.g. a scanned PDF
 		if document.text == "":
 			logger.warning("Skipping document %s: no text", document.id)
-			self.summary.no_text += 1
+			self.summary.empty_documents += 1
 			return None
 
 		try:
 			document_is_new = self.deduplicator.add_if_new(document)
 		except Exception as error:
 			logger.warning("Skipping document %s: duplicate check failed: %s", document.id, describe_error(error))
-			self.summary.duplicate_check_failed += 1
+			self.summary.dedup_failed += 1
 			return None
 
 		if not document_is_new:
 			self.summary.duplicates += 1
 			return None
+
+		self.summary.total_pages += len(document.pages)
+		for page in document.pages:
+			if page.text == "":
+				self.summary.blank_pages += 1
+			self.summary.total_characters += len(page.text)
 
 		return document
 

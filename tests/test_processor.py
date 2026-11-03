@@ -36,12 +36,12 @@ class TestDocumentProcessor(unittest.TestCase):
 		self.assertEqual(document.text, "One\n\nThree\n\nFour")
 		self.assertEqual(self.processor.summary.total_processed, 1)
 		self.assertEqual(self.processor.summary.cleanup_success, 1)
-		self.assertEqual(self.processor.summary.pages, 4)
+		self.assertEqual(self.processor.summary.total_pages, 4)
 
 	def test_no_text_is_counted(self):
-		"""A document with only whitespace is skipped as no_text."""
+		"""A document with only whitespace is skipped as empty_documents."""
 		self.assertIsNone(self.processor.process_document(make_parsed_document("a", ["   ", "\n"], None)))
-		self.assertEqual(self.processor.summary.no_text, 1)
+		self.assertEqual(self.processor.summary.empty_documents, 1)
 
 	def test_duplicate_is_counted(self):
 		"""A second copy is dropped and counted as a duplicate."""
