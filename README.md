@@ -98,6 +98,13 @@ Document(
 
 ## Evaluation
 
+The evaluation scores the engine's output against an independent reference built from Amazon Textract. Only the documents the engine read are scored.
+
+- **Text accuracy:** word recall, precision, F1, word error rate and character error rate.
+- **Cleanup:** share of boilerplate removed and share of content lost.
+- **Metadata:** source exists, page count matches the file, page numbers run 1 to n, each page matches its reference page, and empty titles.
+- **Deduplication:** exact and near copies caught, copies missed and false matches, on a generated test set.
+
 ## Results
 
 ## Limitations
