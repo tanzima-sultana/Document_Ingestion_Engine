@@ -52,7 +52,7 @@
 	<!-- Box 2: Evaluation -->
 	<rect x="150" y="345" width="700" height="250" rx="14" fill="#f0fdf4" stroke="#16a34a" stroke-width="2"/>
 	<text x="500" y="377" text-anchor="middle" font-size="20" font-weight="bold" fill="#14532d">Evaluation</text>
-	<text x="500" y="399" text-anchor="middle" font-size="13" fill="#14532d">scored against an independent Textract reference, side by side with LangChain</text>
+	<text x="500" y="399" text-anchor="middle" font-size="13" fill="#14532d">scored against an independent Textract reference</text>
 
 	<rect x="170" y="420" width="155" height="120" rx="10" fill="#ffffff" stroke="#16a34a" stroke-width="1.5"/>
 	<text x="247" y="450" text-anchor="middle" font-size="15" font-weight="bold" fill="#1e293b">Text accuracy</text>
@@ -76,5 +76,4 @@
 	<text x="757" y="498" text-anchor="middle" font-size="12" fill="#334155">copies caught,</text>
 	<text x="757" y="516" text-anchor="middle" font-size="12" fill="#334155">false matches</text>
 
-	<text x="500" y="575" text-anchor="middle" font-size="13" fill="#14532d">→ one side-by-side report per run</text>
 </svg>
