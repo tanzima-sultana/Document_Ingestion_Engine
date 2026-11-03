@@ -82,11 +82,6 @@ src/doc_ingest/
 		pdf/
 			langchain.py
 			config.yaml
-			run.sh
-
-		docx/
-			langchain.py
-			config.yaml
-			run.sh  	   
+			run.sh	   
 	logs/                        
 ```

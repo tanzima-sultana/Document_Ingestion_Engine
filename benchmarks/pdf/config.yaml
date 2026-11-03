@@ -1,0 +1,4 @@
+# Settings for benchmarks/pdf/langchain.py. Paths are relative to the repo root.
+
+path: data/pdfa-eng-wds_5000         # PDF file or folder of PDFs
+size: 5000                           # most PDF files to load
