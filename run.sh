@@ -21,7 +21,7 @@ export PYTHONPATH="$REPO_ROOT/src"
 CONFIG_PATH="$REPO_ROOT/config.yaml"
 
 mkdir -p logs
-LOG="logs/log_$(date +%Y%m%d_%H%M%S).txt"
+LOG="logs/doc_ingest_log.txt"
 
 # run
 

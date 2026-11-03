@@ -6,7 +6,6 @@ or python -m doc_ingest --config_path config.yaml (run.sh does this).
 """
 
 import argparse
-import datetime
 import json
 import logging
 import os
@@ -157,19 +156,38 @@ def parse_args(argument_list):
 	return parsed_arguments
 
 
-def save_summary_json(summary_values: dict) -> str:
+def save_summary_json(summary_values: dict, input_path: str) -> str:
 	"""
-	Input: summary_values - the run's summary as a dict.
-	Output: the path of the saved file, logs/summary_<date>_<time>.json in the current folder.
-	What it does: writes it as indented JSON, creating logs/ if needed.
+	Input: summary_values - the run's summary as a dict; input_path - the file or folder the run read.
+	Output: the path of the saved file, logs/<dataset name>/doc_ingest/summary.json.
+	What it does: writes it as indented JSON, replacing the last run's file.
 	"""
-	run_time = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-	summary_path = os.path.join("logs", "summary_" + run_time + ".json")
-	os.makedirs("logs", exist_ok=True)
+	dataset_name = os.path.basename(os.path.normpath(input_path))
+	output_folder = os.path.join("logs", dataset_name, "doc_ingest")
+	os.makedirs(output_folder, exist_ok=True)
+	summary_path = os.path.join(output_folder, "summary.json")
 
 	with open(summary_path, "w", encoding="utf-8") as summary_file:
 		json.dump(summary_values, summary_file, indent=2)
 	return summary_path
+
+
+def save_documents_jsonl(documents: list, input_path: str) -> str:
+	"""
+	Input: documents - the returned Documents; input_path - the file or folder the run read.
+	Output: the path of the saved file, logs/<dataset name>/doc_ingest/documents.jsonl.
+	What it does: writes one Document per line as JSON (id, type, source, title, pages), replacing the last run's file.
+	"""
+	dataset_name = os.path.basename(os.path.normpath(input_path))
+	output_folder = os.path.join("logs", dataset_name, "doc_ingest")
+	os.makedirs(output_folder, exist_ok=True)
+	documents_path = os.path.join(output_folder, "documents.jsonl")
+
+	with open(documents_path, "w", encoding="utf-8") as documents_file:
+		for document in documents:
+			document_values = document.model_dump(mode="json")
+			documents_file.write(json.dumps(document_values, ensure_ascii=False) + "\n")
+	return documents_path
 
 
 def main():
@@ -216,8 +234,11 @@ def main():
 
 	print("Document ingestion finished")
 
-	summary_path = save_summary_json(ingest_result.summary.to_dict())
+	summary_path = save_summary_json(ingest_result.summary.to_dict(), args.path)
 	print("Summary saved to " + summary_path)
+
+	documents_path = save_documents_jsonl(ingest_result.documents, args.path)
+	print("Documents saved to " + documents_path)
 
 	# huggingface `datasets`/fsspec leaves a background thread alive after
 	# streaming a dataset, which crashes normal interpreter shutdown with

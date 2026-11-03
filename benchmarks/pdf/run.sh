@@ -17,7 +17,7 @@ export PYTHONPATH="$REPO_ROOT/src"
 CONFIG_PATH="$REPO_ROOT/benchmarks/pdf/config.yaml"
 
 mkdir -p logs
-LOG="logs/langchain_log_$(date +%Y%m%d_%H%M%S).txt"
+LOG="logs/langchain_log.txt"
 
 # run
 
