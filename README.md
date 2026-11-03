@@ -98,7 +98,27 @@ Document(
 
 ## Evaluation
 
-The evaluation scores the engine's output against an independent reference built from Amazon Textract. 
+The evaluation scores the engine's output against an independent reference built from Amazon Textract. Before scoring, the evaluation matches the engine's output to the reference: how many documents and pages were read, returned and left out. 
+
+| | doc_ingest |
+|---|---|
+| reference_documents | 62 |
+| documents_returned | 50 |
+| documents_not_returned | 12 |
+| documents_not_in_reference | 0 |
+| reference_pages | 262 |
+| pages_of_returned_documents | 234 |
+| pages_of_documents_not_returned | 28 |
+
+- **reference_documents (62):** the documents doc_ingest read to return the 50 requested. It skips empty documents and keeps reading until it has 50.
+- **documents_returned (50):** the 50 documents requested.
+- **documents_not_returned (12):** documents with no text on any page (`empty_documents` = 12), which doc_ingest leaves out.
+- **documents_not_in_reference (0):** every returned document has a reference, so all of them can be scored.
+- **reference_pages (262):** the total pages of the 62 documents read.
+- **pages_of_returned_documents (234):** the pages doc_ingest is scored on.
+- **pages_of_documents_not_returned (28):** the pages of the 12 empty documents.
+
+**Evaluation criteria**
 
 - **Text accuracy:** word recall, precision, F1, word error rate and character error rate.
 - **Cleanup:** share of boilerplate removed and share of content lost.
