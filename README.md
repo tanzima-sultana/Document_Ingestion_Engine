@@ -98,7 +98,7 @@ Document(
 
 ## Evaluation
 
-The evaluation scores the engine's output against an independent reference built from Amazon Textract. Only the documents the engine read are scored.
+The evaluation scores the engine's output against an independent reference built from Amazon Textract. 
 
 - **Text accuracy:** word recall, precision, F1, word error rate and character error rate.
 - **Cleanup:** share of boilerplate removed and share of content lost.
