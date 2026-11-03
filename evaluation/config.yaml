@@ -2,10 +2,12 @@
 # The engines are run first with their own run.sh; this only scores what they saved.
 
 dataset: DUDE                                            # name of the raw data folder, data/<dataset>
-size: 50                                                 # size the engines were run with; their output is in logs/<dataset>_<size>/
+document_type: scanned_pdf                                    # document type the engines were run with, e.g. pdf or scanned_pdf
+size: 100                                                # size the engines were run with; their output is in logs/<dataset>_<document_type>_<size>/
 reference_path: data/DUDE_reference/pages.jsonl          # reference page text of the whole raw folder (evaluation/reference_textract.py)
 
 # Dedup quality: builds a test folder of copies, runs doc_ingest on it (settings from config.yaml at the repo root) and scores it.
+# The test folder holds generated text PDFs, so this run always uses document type pdf; dedup itself is the same for every type.
 dedup:
   enabled: true
   output_path: data/DUDE_dedup                           # test folder, one per raw folder; built only if it does not exist yet

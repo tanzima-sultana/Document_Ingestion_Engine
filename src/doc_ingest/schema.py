@@ -10,6 +10,7 @@ class DocumentType(str, Enum):
 	for example "pdf".
 	"""
 	PDF = "pdf"
+	SCANNED_PDF = "scanned_pdf"
 
 
 class Page(BaseModel):

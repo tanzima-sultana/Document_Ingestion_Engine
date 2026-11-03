@@ -38,8 +38,8 @@ EOF
 }
 
 run_evaluation() {
-	# The engines save their output to logs/<dataset>_<size>/
-	LOGS_PATH="logs/$(read_config_value dataset)_$(read_config_value size)"
+	# The engines save their output to logs/<dataset>_<document_type>_<size>/
+	LOGS_PATH="logs/$(read_config_value dataset)_$(read_config_value document_type)_$(read_config_value size)"
 	REFERENCE_PATH="$(read_config_value reference_path)"
 	DEDUP_ENABLED="$(read_config_value dedup.enabled)"
 
@@ -75,14 +75,16 @@ run_evaluation() {
 	# Every file in the test folder is asked for, so none is left out by size
 	DEDUP_FILE_COUNT="$(find "$DEDUP_OUTPUT_PATH" -type f | wc -l)"
 
+	# The test folder holds generated text PDFs, so the run uses document type pdf
 	echo "== Running doc_ingest on the dedup test folder"
 	python3 -m doc_ingest \
 		--config_path "$REPO_ROOT/config.yaml" \
 		--path "$DEDUP_OUTPUT_PATH" \
+		--document_type pdf \
 		--size "$DEDUP_FILE_COUNT"
 
-	# doc_ingest saves to logs/<test folder name>_<size>/doc_ingest/
-	DEDUP_LOGS_PATH="logs/$(basename "$DEDUP_OUTPUT_PATH")_$DEDUP_FILE_COUNT"
+	# doc_ingest saves to logs/<test folder name>_pdf_<size>/doc_ingest/
+	DEDUP_LOGS_PATH="logs/$(basename "$DEDUP_OUTPUT_PATH")_pdf_$DEDUP_FILE_COUNT"
 
 	echo "== Scoring dedup quality"
 	python3 evaluation/dedup_quality.py score \

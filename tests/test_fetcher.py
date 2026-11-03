@@ -46,6 +46,39 @@ class TestLocalFetcher(unittest.TestCase):
 		self.assertEqual(fetcher.summary.wrong_doc_type, 2)
 		self.assertEqual(fetcher.summary.fetch_failed, 0)
 
+	def test_scanned_pdf_keeps_pdf_files(self):
+		"""scanned_pdf keeps .pdf files; every other file is counted as wrong_doc_type and not read."""
+		folder = os.path.join(self.root, "scanned_mixed")
+		pdf_path = helpers.write_file(folder, "a.pdf", helpers.make_report_pdf("a", 1))
+		helpers.write_file(folder, "b.md", b"# title")
+		helpers.write_file(folder, "c.xyz", b"junk")
+		fetcher = LocalFetcher(folder, self.output_path, FetchSettings(document_type="scanned_pdf"))
+		raw_documents = list(fetcher.fetch_documents())
+
+		self.assertEqual(len(raw_documents), 1)
+		self.assertEqual(raw_documents[0].type, "scanned_pdf")
+		self.assertEqual(raw_documents[0].source, pdf_path)
+		self.assertEqual(fetcher.summary.total_fetched, 3)
+		self.assertEqual(fetcher.summary.fetch_success, 1)
+		self.assertEqual(fetcher.summary.wrong_doc_type, 2)
+		self.assertEqual(fetcher.summary.fetch_failed, 0)
+
+	def test_scanned_pdf_jsonl_records(self):
+		"""scanned_pdf keeps a record whose bytes have the %PDF header; a text record is wrong_doc_type."""
+		pdf_bytes = helpers.make_report_pdf("a", 1)
+		lines = json.dumps({"text": base64.b64encode(pdf_bytes).decode("ascii")}) + "\n"
+		lines = lines + json.dumps({"text": "plain words in this record"}) + "\n"
+		jsonl_path = helpers.write_file(self.root, "scanned.jsonl", lines.encode("utf-8"))
+		fetcher = LocalFetcher(jsonl_path, self.output_path, FetchSettings(document_type="scanned_pdf"))
+		raw_documents = list(fetcher.fetch_documents())
+
+		self.assertEqual(len(raw_documents), 1)
+		self.assertEqual(raw_documents[0].type, "scanned_pdf")
+		self.assertEqual(raw_documents[0].source, jsonl_path + "#0")
+		# A record is counted as fetched once decoded, before its type is checked
+		self.assertEqual(fetcher.summary.fetch_success, 2)
+		self.assertEqual(fetcher.summary.wrong_doc_type, 1)
+
 	def test_local_file_is_not_copied(self):
 		"""A local file is parsed from its original path; nothing is saved to the storage folder."""
 		folder = os.path.join(self.root, "originals")

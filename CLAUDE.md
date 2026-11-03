@@ -68,6 +68,7 @@ All commands below assume cuprrent working directory is the repo root (`DocInges
 			__init__.py
 			parser.py           # Parser base class
 			pdf.py
+			scanned_pdf.py
 
 		processing/          	# Processed ParsedDocument and produces final Document
 			__init__.py
@@ -84,7 +85,7 @@ All commands below assume cuprrent working directory is the repo root (`DocInges
 		dedup_quality.py        # Dedup quality: check removed pairs, known copies and false matches.
 		metadata_quality.py 	# Metadata and page numbers: check title, page_count, source, and that eachtext for citations.    
 		run.sh                  # Runs evaluation, dedup quality and the report with config.yaml
-        config.yaml             # settings for evaluation/run.sh
+    	config.yaml             # settings for evaluation/run.sh
           
 
 	data/

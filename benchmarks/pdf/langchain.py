@@ -46,9 +46,9 @@ def load_pages(path: str, size: int) -> list:
 def main() -> None:
 	"""
 	Input: --config_path from the command line (a YAML file with path and size).
-	Output: none. Prints the counts for the run and saves them to logs/<dataset name>_<size>/langchain/summary.json,
-	the pages to logs/<dataset name>_<size>/langchain/documents.jsonl, and every PDF path it tried to
-	logs/<dataset name>_<size>/langchain/sources_read.txt. All replace the last run's files.
+	Output: none. Prints the counts for the run and saves them to logs/<dataset name>_pdf_<size>/langchain/summary.json,
+	the pages to logs/<dataset name>_pdf_<size>/langchain/documents.jsonl, and every PDF path it tried to
+	logs/<dataset name>_pdf_<size>/langchain/sources_read.txt. All replace the last run's files.
 	What it does: loads each PDF with plain LangChain and counts the files it loads, the pages it returns,
 	the blank pages (only whitespace) and the raw characters of all pages. Each loaded file is saved
 	as one line: its source and its pages, each with a number from 1 and its raw text.
@@ -63,7 +63,7 @@ def main() -> None:
 	pdf_paths = list_pdf_files(config_values["path"])[:config_values["size"]]
 
 	dataset_name = os.path.basename(os.path.normpath(config_values["path"]))
-	output_folder = os.path.join("logs", dataset_name + "_" + str(config_values["size"]), "langchain")
+	output_folder = os.path.join("logs", dataset_name + "_pdf_" + str(config_values["size"]), "langchain")
 	os.makedirs(output_folder, exist_ok=True)
 	documents_path = os.path.join(output_folder, "documents.jsonl")
 	documents_file = open(documents_path, "w", encoding="utf-8")

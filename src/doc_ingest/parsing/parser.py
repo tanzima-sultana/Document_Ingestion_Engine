@@ -109,10 +109,12 @@ def get_parser_class(document_type: str) -> type[BaseParser]:
 	# imported here, not at module level, to avoid the circular import
 	# described above
 	from doc_ingest.parsing.pdf import PdfParser
+	from doc_ingest.parsing.scanned_pdf import ScannedPdfParser
 
 	# document type -> BaseParser subclass
 	parser_registry: dict[str, type[BaseParser]] = {
 		"pdf": PdfParser,
+		"scanned_pdf": ScannedPdfParser,
 	}
 
 	if document_type not in parser_registry:
