@@ -9,7 +9,7 @@ A pluggable Python library that turns raw files into clean, deduplicated documen
 - **Deduplication:** removes exact and near-duplicate documents.
 - **Skips blank documents:** totally empty documents are never processed or returned.
 - **Returns the requested count:** keeps reading past skipped documents until it has the number of documents asked for, or the source runs out.
-- **Measured accuracy and quality:** text accuracy, cleanup, metadata and deduplication are scored against the Amazon Textract output that ships with the DUDE dataset, and compared with plain LangChain.
+- **Measured accuracy and quality:** text accuracy, cleanup, metadata and deduplication are scored against a reference built from Amazon Textract output, and compared with plain LangChain.
 - **Compared with LangChain:** on 100 DUDE PDFs, F1 0.82 vs 0.78, word error rate 0.59 vs 0.64, character error rate 0.46 vs 0.52.
 
 ## Installation
